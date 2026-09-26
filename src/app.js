@@ -45,6 +45,7 @@ const state = {
   hideInstalled: localStorage.getItem("cl_hide_installed") === "true",
   installedModSlugs: new Set(),
   installedModFiles: [],
+  coreModsWarned: false,
 
   // 3D Skin Viewer
   skinViewer: null,
@@ -155,7 +156,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 2) {
+        if (data && Number(data.api_version) >= 3) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -484,10 +485,16 @@ function setupEventListeners() {
   const hideInstalledToggle = document.getElementById("hideInstalledToggle");
   if (hideInstalledToggle) {
     hideInstalledToggle.checked = state.hideInstalled;
-    hideInstalledToggle.addEventListener("change", (e) => {
+    hideInstalledToggle.addEventListener("change", async (e) => {
       state.hideInstalled = e.target.checked;
       localStorage.setItem("cl_hide_installed", state.hideInstalled);
+
+      // Liste daha önce boş yüklendiyse önce yüklü modları tazele
+      if (state.installedModSlugs.size === 0 && state.installedModFiles.length === 0) {
+        await refreshInstalledMods();
+      }
       applyInstalledStates();
+
       showToast(
         state.hideInstalled
           ? "Yüklü modlar listeden gizlendi."
@@ -525,7 +532,11 @@ function switchTab(tabId) {
 
   if (tabId === "tab-modrinth") {
     renderModrinthTargetBar();
-    if (state.modrinthHits.length === 0) fetchModrinth(true);
+    if (state.modrinthHits.length === 0) {
+      fetchModrinth(true);
+    } else {
+      refreshInstalledMods().then(applyInstalledStates);
+    }
   } else if (tabId === "tab-gallery") {
     loadScreenshots();
   } else if (tabId === "tab-instances") {
@@ -1292,7 +1303,14 @@ async function refreshInstalledMods() {
   if (!target) return;
 
   const data = await apiGet(`/api/instances/mods?instance_id=${encodeURIComponent(target.id)}`, 8000);
-  if (!data || data.success !== true) return;
+  if (!data || data.success !== true) {
+    // Core eski sürümdeyse (endpoint yoksa) kullanıcıyı bir kez bilgilendir
+    if (!state.coreModsWarned) {
+      state.coreModsWarned = true;
+      showToast("Core güncel değil: yüklü mod tespiti için launcher'ı yeniden başlatın.", "info");
+    }
+    return;
+  }
 
   const manifest = data.manifest || {};
   Object.keys(manifest).forEach(slug => state.installedModSlugs.add(String(slug).toLowerCase()));

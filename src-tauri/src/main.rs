@@ -37,7 +37,8 @@ fn backend_health_ok() -> bool {
     }
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
-    response.contains("\"api_version\": 2") || response.contains("\"api_version\":2")
+    // Backend surumu degistiginde bu deger GUNCELLENMELI (backend/server.py API_VERSION ile ayni).
+    response.contains("\"api_version\": 3") || response.contains("\"api_version\":3")
 }
 
 /// Backend'in bulunabilecegi tum kok dizinleri dondurur.
