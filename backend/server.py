@@ -71,7 +71,7 @@ os.makedirs(SKINS_DIR, exist_ok=True)
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 6
+API_VERSION = 7
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -247,6 +247,108 @@ def set_skin_model(username, model):
     entry["model"] = "slim" if str(model or "").lower() in ("slim", "alex", "ince") else "default"
     index[safe] = entry
     save_skin_index(index)
+
+
+# Oyuncu varsayilan doku yollari (tum surumler kapsanir; fazla yollar zararsiz)
+PLAYER_TEXTURE_PATHS = [
+    "assets/minecraft/textures/entity/player/wide/steve.png",
+    "assets/minecraft/textures/entity/player/wide/alex.png",
+    "assets/minecraft/textures/entity/player/slim/steve.png",
+    "assets/minecraft/textures/entity/player/slim/alex.png",
+    "assets/minecraft/textures/entity/player/steve.png",
+    "assets/minecraft/textures/entity/player/alex.png",
+    "assets/minecraft/textures/entity/steve.png",
+    "assets/minecraft/textures/entity/alex.png",
+]
+
+
+def build_skin_resourcepack(username):
+    """
+    Kullanicinin skinini, varsayilan oyuncu dokularini gecersiz kilan
+    minimal bir doku paketi (zip) olarak uretir. Mod gerektirmez.
+    """
+    entry = get_skin_entry(username)
+    if not entry:
+        return None, None
+
+    skin_path = get_skin_path(entry["username"])
+    if not os.path.isfile(skin_path):
+        return None, None
+
+    try:
+        with open(skin_path, "rb") as f:
+            skin_bytes = f.read()
+    except Exception:
+        return None, None
+
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    try:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in PLAYER_TEXTURE_PATHS:
+                zf.writestr(path, skin_bytes)
+            zf.writestr("pack.mcmeta", json.dumps({
+                "pack": {
+                    "pack_format": 15,
+                    "description": f"CookieLauncher Skin: {entry['username']}",
+                    "supported_formats": {"min_inclusive": 1, "max_inclusive": 9999},
+                }
+            }))
+            zf.writestr("pack.png", skin_bytes)
+    except Exception:
+        return None, None
+
+    return buf.getvalue(), f"CookieSkin_{entry['username']}.zip"
+
+
+def enable_resourcepack_in_options(inst_dir, pack_name):
+    """options.txt icinde doku paketini etkinlestirir (dosya yoksa olusturur)."""
+    options_path = os.path.join(inst_dir, "options.txt")
+    pack_entry = f"file/{pack_name}"
+
+    lines = []
+    if os.path.exists(options_path):
+        try:
+            with open(options_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except Exception:
+            lines = []
+
+    def parse_list(raw):
+        try:
+            value = json.loads(raw)
+            return value if isinstance(value, list) else []
+        except Exception:
+            return []
+
+    out = []
+    seen_resource_packs = False
+    for line in lines:
+        if line.startswith("resourcePacks:"):
+            current = [str(p) for p in parse_list(line.split(":", 1)[1])]
+            if pack_entry not in current:
+                current.append(pack_entry)
+            if "vanilla" not in current:
+                current.insert(0, "vanilla")
+            out.append("resourcePacks:" + json.dumps(current))
+            seen_resource_packs = True
+        elif line.startswith("incompatibleResourcePacks:"):
+            current = [str(p) for p in parse_list(line.split(":", 1)[1]) if str(p) != pack_entry]
+            out.append("incompatibleResourcePacks:" + json.dumps(current))
+        else:
+            out.append(line)
+
+    if not seen_resource_packs:
+        out.append("resourcePacks:" + json.dumps(["vanilla", pack_entry]))
+
+    try:
+        with open(options_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(out) + "\n")
+        return True
+    except Exception:
+        return False
 
 
 # ==================== KONSOL GUNLUK & DURUM YONETIMI ====================
@@ -1806,7 +1908,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "app": "CookieLauncher",
                     "version": "2.0.0",
                     "api_version": API_VERSION,
-                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage", "content_icons", "skin_loader"],
+                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage", "content_icons", "skin_loader", "skin_pack"],
                 })
                 return
 
@@ -2456,7 +2558,43 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     })
                 return
 
-            # 7a. CustomSkinLoader Kurulumu (offline skinlerin oyunda gorunmesi icin)
+            # 7a. Skini Oyunda Goster (doku paketi yontemi - mod gerektirmez)
+            if path in ("/skin/apply", "/skin/apply/"):
+                inst = load_instance_config(body.get("instance_id"))
+                if not inst:
+                    self.send_json({"success": False, "error": "Profil bulunamadı."})
+                    return
+
+                username = body.get("username") or "Steve"
+                pack_bytes, pack_name = build_skin_resourcepack(username)
+                if not pack_bytes:
+                    self.send_json({"success": False, "error": "Önce bir skin yükleyin."})
+                    return
+
+                inst_dir = get_instance_dir(inst["id"])
+                packs_dir = os.path.join(inst_dir, "resourcepacks")
+                os.makedirs(packs_dir, exist_ok=True)
+                try:
+                    with open(os.path.join(packs_dir, pack_name), "wb") as f:
+                        f.write(pack_bytes)
+                except Exception as e:
+                    self.send_json({"success": False, "error": f"Doku paketi yazılamadı: {e}"})
+                    return
+
+                if not enable_resourcepack_in_options(inst_dir, pack_name):
+                    self.send_json({"success": False, "error": "options.txt güncellenemedi."})
+                    return
+
+                register_installed_content(inst["id"], "resourcepack", "cookie-skin", pack_name, "")
+                add_log(f"🎨 Skin doku paketi uygulandı: {pack_name} → {inst.get('name')}")
+                self.send_json({
+                    "success": True,
+                    "filename": pack_name,
+                    "message": "Skin doku paketi kuruldu ve etkinleştirildi. Oyuna girince skininiz görünecek.",
+                })
+                return
+
+            # 7a2. CustomSkinLoader Kurulumu (offline skinlerin oyunda gorunmesi icin)
             if path in ("/skin/loader/install", "/skin/loader/install/"):
                 inst = load_instance_config(body.get("instance_id"))
                 if not inst:

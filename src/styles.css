@@ -2270,3 +2270,24 @@ body::before {
   opacity: 0.6;
   cursor: wait;
 }
+
+.skin-pack-btn {
+  background: rgba(166, 227, 161, 0.16);
+  border-color: rgba(166, 227, 161, 0.5);
+  font-weight: 700;
+}
+
+.skin-pack-btn:hover {
+  background: rgba(166, 227, 161, 0.3);
+}
+
+.skin-loader-adv-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
+  font-size: 10px;
+  padding: 7px 10px;
+}
+
+.skin-loader-adv-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}

@@ -161,7 +161,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 6) {
+        if (data && Number(data.api_version) >= 7) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -380,6 +380,11 @@ function setupEventListeners() {
   const btnInstallSkinLoader = document.getElementById("btnInstallSkinLoader");
   if (btnInstallSkinLoader) {
     btnInstallSkinLoader.addEventListener("click", installSkinLoader);
+  }
+
+  const btnApplySkinPack = document.getElementById("btnApplySkinPack");
+  if (btnApplySkinPack) {
+    btnApplySkinPack.addEventListener("click", applySkinPack);
   }
 
   // Sürüm Seçim Modalı
@@ -2053,6 +2058,60 @@ async function installSkinLoader() {
   }
 }
 
+async function applySkinPack() {
+  const target = getActiveInstance();
+  if (!target) {
+    showToast("Önce bir profil oluşturup aktif edin.", "info");
+    return;
+  }
+
+  const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(state.username)}`, 5000);
+  if (!info || !info.has_skin) {
+    showToast("Önce bir skin yükleyin.", "info");
+    return;
+  }
+
+  const btn = document.getElementById("btnApplySkinPack");
+  const label = "🎮 Oyunda Göster (Doku Paketi)";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "🎮 Uygulanıyor...";
+  }
+
+  const data = await apiPost("/api/skin/apply", {
+    instance_id: target.id,
+    username: state.username
+  }, 30000);
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+
+  if (data && data.success) {
+    localStorage.setItem(`cl_skin_pack_${target.id}`, "1");
+    showToast(`✓ ${data.message || "Skin oyunda görünecek."}`, "success");
+    refreshInstalledContent();
+    loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Doku paketi uygulanamadı."}`, "error");
+  }
+}
+
+async function maybeReapplySkinPack() {
+  const target = getActiveInstance();
+  if (!target) return;
+  if (localStorage.getItem(`cl_skin_pack_${target.id}`) !== "1") return;
+
+  const data = await apiPost("/api/skin/apply", {
+    instance_id: target.id,
+    username: state.username
+  }, 30000);
+  if (data && data.success) {
+    showToast("🎨 Oyundaki skin güncellendi.", "success");
+  }
+}
+
 function loadViewerSkin(url, fallbackName) {
   if (!state.skinViewer) return;
   try {
@@ -2091,6 +2150,7 @@ async function handleSkinFileSelected(e) {
     if (data && data.success) {
       showToast("✓ Skin kaydedildi ve önizlemeye uygulandı.", "success");
       applySkinForUsername(state.username);
+      maybeReapplySkinPack();
     } else {
       showToast(`⚠️ ${(data && data.error) || "Skin kaydedilemedi."}`, "error");
     }
@@ -2113,6 +2173,7 @@ async function handleSkinUrlSave() {
   if (data && data.success) {
     showToast("✓ Skin URL'den kaydedildi.", "success");
     applySkinForUsername(state.username);
+    maybeReapplySkinPack();
   } else {
     showToast(`⚠️ ${(data && data.error) || "Skin indirilemedi."}`, "error");
   }
