@@ -15,6 +15,7 @@ import re
 import time
 import struct
 import base64
+import hashlib
 import shutil
 import socket
 import threading
@@ -70,7 +71,7 @@ os.makedirs(SKINS_DIR, exist_ok=True)
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 5
+API_VERSION = 6
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -168,6 +169,84 @@ def save_skin_bytes(username, raw):
         return path
     except Exception:
         return None
+
+
+# ==================== OFFLINE SKIN INDEKSI (MODEL + HASH) ====================
+SKIN_INDEX_FILE = os.path.join(SKINS_DIR, "index.json")
+
+
+def load_skin_index():
+    if os.path.exists(SKIN_INDEX_FILE):
+        try:
+            with open(SKIN_INDEX_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {}
+
+
+def save_skin_index(data):
+    try:
+        with open(SKIN_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def skin_sha1(path):
+    try:
+        h = hashlib.sha1()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def get_skin_entry(username):
+    """Kullaniciya ait skin girdisini (model + hash) dondurur; yoksa None."""
+    safe = sanitize_username(username)
+    path = get_skin_path(safe)
+    if not os.path.isfile(path):
+        return None
+
+    index = load_skin_index()
+    entry = index.get(safe)
+    digest = skin_sha1(path)
+    try:
+        mtime = int(os.path.getmtime(path))
+    except OSError:
+        mtime = 0
+
+    if not isinstance(entry, dict) or entry.get("hash") != digest:
+        model = "default"
+        if isinstance(entry, dict) and str(entry.get("model", "")).lower() == "slim":
+            model = "slim"
+        entry = {
+            "model": model,
+            "hash": digest,
+            "file": f"{safe}.png",
+            "updated_at": mtime,
+        }
+        index[safe] = entry
+        save_skin_index(index)
+
+    entry["username"] = safe
+    return entry
+
+
+def set_skin_model(username, model):
+    safe = sanitize_username(username)
+    index = load_skin_index()
+    entry = index.get(safe)
+    if not isinstance(entry, dict):
+        entry = {}
+    entry["model"] = "slim" if str(model or "").lower() in ("slim", "alex", "ince") else "default"
+    index[safe] = entry
+    save_skin_index(index)
 
 
 # ==================== KONSOL GUNLUK & DURUM YONETIMI ====================
@@ -1727,7 +1806,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "app": "CookieLauncher",
                     "version": "2.0.0",
                     "api_version": API_VERSION,
-                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage", "content_icons"],
+                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage", "content_icons", "skin_loader"],
                 })
                 return
 
@@ -1915,15 +1994,62 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
             # 7. Offline Skin Bilgisi
             if path == "/skin/info":
                 username = query.get("username", ["Steve"])[0]
+                entry = get_skin_entry(username)
                 safe = sanitize_username(username)
-                fp = get_skin_path(safe)
-                has_skin = os.path.isfile(fp)
                 self.send_json({
                     "success": True,
                     "username": safe,
-                    "has_skin": has_skin,
-                    "skin_url": f"/api/skin/{safe}.png" if has_skin else None,
+                    "has_skin": bool(entry),
+                    "model": (entry or {}).get("model", "default"),
+                    "skin_url": f"/api/skin/{safe}.png" if entry else None,
                 })
+                return
+
+            # 7b. CustomSkinAPI (CustomSkinLoader icin yerel skin sunucusu)
+            if path.startswith("/skinapi/"):
+                rest = path[len("/skinapi/"):].strip("/")
+
+                # /skinapi/textures/<hash>
+                if rest.startswith("textures/"):
+                    tex_id = re.sub(r"[^\w]", "", rest[len("textures/"):])
+                    found_path = None
+                    for uname, meta in load_skin_index().items():
+                        if isinstance(meta, dict) and meta.get("hash") == tex_id:
+                            candidate = get_skin_path(uname)
+                            if os.path.isfile(candidate):
+                                found_path = candidate
+                            break
+                    if not found_path:
+                        self.send_json({"success": False, "error": "Doku bulunamadı."}, 404)
+                        return
+                    try:
+                        with open(found_path, "rb") as f:
+                            tex_bytes = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "image/png")
+                        self.send_header("Content-Length", str(len(tex_bytes)))
+                        self.send_header("Cache-Control", "public, max-age=3600")
+                        self.end_headers()
+                        self.wfile.write(tex_bytes)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    return
+
+                # /skinapi/<username>.json
+                if rest.endswith(".json"):
+                    username = rest[:-5]
+                    entry = get_skin_entry(username)
+                    if not entry:
+                        self.send_json({"success": False, "error": "Skin bulunamadı."}, 404)
+                        return
+                    model = "slim" if str(entry.get("model", "")).lower() == "slim" else "default"
+                    self.send_json({
+                        "username": entry.get("username", sanitize_username(username)),
+                        "textures": {model: entry.get("hash", "")},
+                    })
+                    return
+
+                self.send_json({"success": False, "error": "Geçersiz skinapi isteği."}, 404)
                 return
 
             # 8. Offline Skin Dosyasi Sunumu
@@ -2307,8 +2433,20 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     except Exception:
                         raw = None
 
+                # Sadece model guncellemesi (skin zaten kayitliysa)
+                if not raw and not image_url and body.get("model"):
+                    if os.path.isfile(get_skin_path(username)):
+                        set_skin_model(username, body.get("model"))
+                        self.send_json({
+                            "success": True,
+                            "skin_url": f"/api/skin/{username}.png",
+                            "model_updated": True,
+                        })
+                        return
+
                 saved = save_skin_bytes(username, raw)
                 if saved:
+                    set_skin_model(username, body.get("model") or "default")
                     add_log(f"🎨 Skin kaydedildi: {username}")
                     self.send_json({"success": True, "skin_url": f"/api/skin/{username}.png"})
                 else:
@@ -2316,6 +2454,108 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         "success": False,
                         "error": "Geçerli bir PNG skin bulunamadı (64x64 / 64x32 / 128x128, max 2MB).",
                     })
+                return
+
+            # 7a. CustomSkinLoader Kurulumu (offline skinlerin oyunda gorunmesi icin)
+            if path in ("/skin/loader/install", "/skin/loader/install/"):
+                inst = load_instance_config(body.get("instance_id"))
+                if not inst:
+                    self.send_json({"success": False, "error": "Profil bulunamadı."})
+                    return
+
+                force = bool(body.get("force"))
+                gv = clean_minecraft_version(inst.get("version"))
+                loader = (inst.get("loader") or "fabric").lower()
+
+                if loader == "vanilla":
+                    self.send_json({
+                        "success": False,
+                        "error": "Vanilla profillere mod kurulmaz. Fabric/Forge profili seçin.",
+                    })
+                    return
+
+                info = ModrinthFetcher.get_project_file(
+                    "customskinloader", gv, project_type="mod", loader=loader, allow_fallback=True
+                )
+                if not info or not info.get("url"):
+                    self.send_json({
+                        "success": False,
+                        "error": f"CustomSkinLoader MC {gv} ({loader}) için bulunamadı.",
+                    })
+                    return
+
+                exact = bool(info.get("exact_match"))
+                if not exact and not force:
+                    self.send_json({
+                        "success": False,
+                        "needs_confirm": True,
+                        "exact_match": False,
+                        "filename": info.get("filename"),
+                        "message": (
+                            f"CustomSkinLoader'ın MC {gv} için resmi sürümü henüz yok. "
+                            f"En yakın sürüm ({info.get('version_number')}) kurulacak. "
+                            "Oyun açılmazsa Modlar panelinden tek tıkla kaldırabilirsiniz."
+                        ),
+                    })
+                    return
+
+                inst_dir = get_instance_dir(inst.get("id"))
+                mods_dir = os.path.join(inst_dir, "mods")
+                os.makedirs(mods_dir, exist_ok=True)
+
+                fname = info["filename"]
+                dest = os.path.join(mods_dir, fname)
+                if not os.path.exists(dest):
+                    add_log(f"🎨 CustomSkinLoader indiriliyor: {fname}")
+                    ModrinthFetcher.download_file(info["url"], dest)
+
+                register_installed_content(
+                    inst.get("id"), "mod", "customskinloader", fname,
+                    info.get("version_number") or "",
+                )
+
+                # CSL config: yerel CustomSkinAPI en ustte
+                port = self.server.server_address[1]
+                skin_config = {
+                    "version": str(info.get("version_number") or "15.0").split("-")[0],
+                    "buildNumber": 0,
+                    "loadlist": [
+                        {
+                            "name": "CookieLauncher",
+                            "type": "CustomSkinAPI",
+                            "root": f"http://127.0.0.1:{port}/api/skinapi/",
+                        },
+                        {
+                            "name": "Mojang",
+                            "type": "MojangAPI",
+                            "apiRoot": "https://api.mojang.com/",
+                            "sessionRoot": "https://sessionserver.mojang.com/",
+                        },
+                    ],
+                    "enableTransparentSkin": True,
+                    "forceLoadAllTextures": True,
+                    "enableCape": True,
+                    "threadPoolSize": 8,
+                    "enableLogStdOut": False,
+                    "cacheExpiry": 30,
+                }
+                cfg_path = os.path.join(inst_dir, "CustomSkinLoader", "CustomSkinLoader.json")
+                try:
+                    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(skin_config, f, indent=2)
+                except Exception as e:
+                    self.send_json({"success": False, "error": f"Config yazılamadı: {e}"})
+                    return
+
+                add_log(f"✓ CustomSkinLoader kuruldu ({fname}) ve config yazıldı.")
+                self.send_json({
+                    "success": True,
+                    "filename": fname,
+                    "exact_match": exact,
+                    "api_root": f"http://127.0.0.1:{port}/api/skinapi/",
+                    "message": "CustomSkinLoader kuruldu. Oyuna girince skininiz görünecek.",
+                })
                 return
 
             # 7b. Profil Icerigi Silme (mod / shader / doku paketi)

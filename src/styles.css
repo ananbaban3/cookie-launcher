@@ -2241,3 +2241,32 @@ body::before {
   border: 1px solid var(--border-subtle);
   background: rgba(0, 0, 0, 0.25);
 }
+
+/* ================== OFFLINE SKIN / SKIN LOADER ================== */
+.skin-upload-row {
+  align-items: center;
+}
+
+.skin-model-select {
+  flex: 0 0 112px;
+  font-size: 11px;
+  padding: 7px 26px 7px 10px;
+}
+
+.skin-loader-btn {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 11px;
+  padding: 9px 10px;
+  background: rgba(166, 227, 161, 0.1);
+  border-color: rgba(166, 227, 161, 0.35);
+}
+
+.skin-loader-btn:hover {
+  background: rgba(166, 227, 161, 0.22);
+}
+
+.skin-loader-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}

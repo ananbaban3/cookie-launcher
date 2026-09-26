@@ -103,14 +103,19 @@
 
             <div class="skin-upload-row">
               <button class="btn-secondary" id="btnUploadSkin">🎨 Skin Yükle (PNG)</button>
-              <button class="btn-secondary" id="btnSkinUrl">🔗 URL ile Ekle</button>
+              <select id="skinModelSelect" class="styled-select skin-model-select" title="Karakter modeli">
+                <option value="default">Klasik (Steve)</option>
+                <option value="slim">İnce (Alex)</option>
+              </select>
+              <button class="btn-secondary" id="btnSkinUrl">🔗</button>
               <input type="file" id="skinFileInput" accept="image/png" style="display: none;">
             </div>
+            <button class="btn-secondary skin-loader-btn" id="btnInstallSkinLoader">🎮 Oyunda Da Göster (Skin Loader Kur)</button>
             <div class="skin-url-row" id="skinUrlRow" style="display: none;">
               <input type="text" id="skinUrlInput" class="styled-input" placeholder="https://ornek.com/skin.png" autocomplete="off" spellcheck="false">
               <button class="btn-secondary" id="btnSaveSkinUrl">Kaydet</button>
             </div>
-            <p class="skin-hint">Yüklediğiniz skin yalnızca launcher önizlemesinde kullanılır.</p>
+            <p class="skin-hint">Skin, launcher önizlemesinde ve "Skin Loader" kurulu olduğunda oyunda görünür (çevrimdışı hesap / offline sunucular).</p>
           </div>
 
           <!-- SAĞ SÜTUN: Başlatma & Yapılandırma Paneli -->

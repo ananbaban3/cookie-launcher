@@ -161,7 +161,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 5) {
+        if (data && Number(data.api_version) >= 6) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -364,6 +364,22 @@ function setupEventListeners() {
   const btnSaveSkinUrl = document.getElementById("btnSaveSkinUrl");
   if (btnSaveSkinUrl) {
     btnSaveSkinUrl.addEventListener("click", handleSkinUrlSave);
+  }
+
+  const skinModelSelect = document.getElementById("skinModelSelect");
+  if (skinModelSelect) {
+    skinModelSelect.addEventListener("change", async (e) => {
+      const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(state.username)}`, 5000);
+      if (info && info.has_skin) {
+        await apiPost("/api/skin/save", { username: state.username, model: e.target.value }, 10000);
+        showToast("Skin modeli güncellendi.", "info");
+      }
+    });
+  }
+
+  const btnInstallSkinLoader = document.getElementById("btnInstallSkinLoader");
+  if (btnInstallSkinLoader) {
+    btnInstallSkinLoader.addEventListener("click", installSkinLoader);
   }
 
   // Sürüm Seçim Modalı
@@ -1972,11 +1988,69 @@ async function applySkinForUsername(username) {
   const clean = (username || "Steve").trim() || "Steve";
 
   const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(clean)}`, 5000);
+
+  const modelSelect = document.getElementById("skinModelSelect");
+  if (modelSelect && info && info.model) {
+    modelSelect.value = info.model === "slim" ? "slim" : "default";
+  }
+
   if (info && info.has_skin && info.skin_url) {
     loadViewerSkin(`${API_BASE}${info.skin_url}?t=${Date.now()}`, clean);
     return;
   }
   loadViewerSkin(`https://mc-heads.net/skin/${encodeURIComponent(clean)}`, clean);
+}
+
+function getSelectedSkinModel() {
+  const select = document.getElementById("skinModelSelect");
+  return select && select.value === "slim" ? "slim" : "default";
+}
+
+async function installSkinLoader() {
+  const target = getActiveInstance();
+  if (!target) {
+    showToast("Önce bir profil oluşturup aktif edin.", "info");
+    return;
+  }
+
+  const btn = document.getElementById("btnInstallSkinLoader");
+  const label = "🎮 Oyunda Da Göster (Skin Loader Kur)";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "🎮 Kuruluyor...";
+  }
+
+  let data = await apiPost("/api/skin/loader/install", { instance_id: target.id }, 90000);
+
+  if (data && data.needs_confirm) {
+    const ok = await showConfirmDialog({
+      icon: "⚠️",
+      title: "Skin Loader Sürümü",
+      message: data.message || "Bu sürüm için resmi derleme yok; en yakın sürüm kurulacak.",
+      okText: "Yine de Kur"
+    });
+    if (!ok) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+      return;
+    }
+    data = await apiPost("/api/skin/loader/install", { instance_id: target.id, force: true }, 90000);
+  }
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+
+  if (data && data.success) {
+    showToast(`✓ ${data.message || "Skin Loader kuruldu."}`, "success");
+    refreshInstalledContent();
+    loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Skin Loader kurulamadı."}`, "error");
+  }
 }
 
 function loadViewerSkin(url, fallbackName) {
@@ -2009,7 +2083,11 @@ async function handleSkinFileSelected(e) {
 
   const reader = new FileReader();
   reader.onload = async () => {
-    const data = await apiPost("/api/skin/save", { username: state.username, data_url: reader.result }, 20000);
+    const data = await apiPost("/api/skin/save", {
+      username: state.username,
+      data_url: reader.result,
+      model: getSelectedSkinModel()
+    }, 20000);
     if (data && data.success) {
       showToast("✓ Skin kaydedildi ve önizlemeye uygulandı.", "success");
       applySkinForUsername(state.username);
@@ -2027,7 +2105,11 @@ async function handleSkinUrlSave() {
     showToast("Lütfen bir görsel URL'si girin.", "info");
     return;
   }
-  const data = await apiPost("/api/skin/save", { username: state.username, url }, 20000);
+  const data = await apiPost("/api/skin/save", {
+    username: state.username,
+    url: url,
+    model: getSelectedSkinModel()
+  }, 20000);
   if (data && data.success) {
     showToast("✓ Skin URL'den kaydedildi.", "success");
     applySkinForUsername(state.username);
