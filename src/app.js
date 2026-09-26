@@ -52,9 +52,6 @@ const state = {
   contentLoadFailed: false,
   coreModsWarned: false,
 
-  // 3D Skin Viewer
-  skinViewer: null,
-  activeAnim: "walk",
 
   // Başlatma / Polling
   isPollingStatus: false,
@@ -180,7 +177,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   await detectApiBase();
   initUI();
   setupEventListeners();
-  initSkinViewer(state.username);
   loadVersions();
   loadInstances();
   startStatusPolling();
@@ -241,7 +237,6 @@ function setupEventListeners() {
     uInput.addEventListener("input", (e) => {
       state.username = e.target.value.trim() || "Steve";
       localStorage.setItem("cl_username", state.username);
-      updateSkinAvatar(state.username);
     });
   }
 
@@ -345,48 +340,6 @@ function setupEventListeners() {
     });
   }
 
-  // ===== Offline Skin =====
-  const btnUploadSkin = document.getElementById("btnUploadSkin");
-  const skinFileInput = document.getElementById("skinFileInput");
-  if (btnUploadSkin && skinFileInput) {
-    btnUploadSkin.addEventListener("click", () => skinFileInput.click());
-    skinFileInput.addEventListener("change", handleSkinFileSelected);
-  }
-
-  const btnSkinUrl = document.getElementById("btnSkinUrl");
-  const skinUrlRow = document.getElementById("skinUrlRow");
-  if (btnSkinUrl && skinUrlRow) {
-    btnSkinUrl.addEventListener("click", () => {
-      skinUrlRow.style.display = skinUrlRow.style.display === "none" ? "flex" : "none";
-    });
-  }
-
-  const btnSaveSkinUrl = document.getElementById("btnSaveSkinUrl");
-  if (btnSaveSkinUrl) {
-    btnSaveSkinUrl.addEventListener("click", handleSkinUrlSave);
-  }
-
-  const skinModelSelect = document.getElementById("skinModelSelect");
-  if (skinModelSelect) {
-    skinModelSelect.addEventListener("change", async (e) => {
-      const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(state.username)}`, 5000);
-      if (info && info.has_skin) {
-        await apiPost("/api/skin/save", { username: state.username, model: e.target.value }, 10000);
-        showToast("Skin modeli güncellendi.", "info");
-      }
-    });
-  }
-
-  const btnInstallSkinLoader = document.getElementById("btnInstallSkinLoader");
-  if (btnInstallSkinLoader) {
-    btnInstallSkinLoader.addEventListener("click", installSkinLoader);
-  }
-
-  const btnApplySkinPack = document.getElementById("btnApplySkinPack");
-  if (btnApplySkinPack) {
-    btnApplySkinPack.addEventListener("click", applySkinPack);
-  }
-
   // Sürüm Seçim Modalı
   const btnOpenVModal = document.getElementById("btnOpenVersionModal");
   if (btnOpenVModal) btnOpenVModal.addEventListener("click", openVersionSelectorModal);
@@ -467,22 +420,6 @@ function setupEventListeners() {
   if (btnDismissProgress) {
     btnDismissProgress.addEventListener("click", () => {
       closeProgressModal();
-    });
-  }
-
-  // 3D Animasyon Butonları
-  document.querySelectorAll(".btn-skin-anim[data-anim]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".btn-skin-anim").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      setSkinAnimation(btn.getAttribute("data-anim"));
-    });
-  });
-
-  const btnResetCam = document.getElementById("btnResetSkinCam");
-  if (btnResetCam) {
-    btnResetCam.addEventListener("click", () => {
-      if (state.skinViewer && state.skinViewer.controls) state.skinViewer.controls.reset();
     });
   }
 
@@ -1934,249 +1871,6 @@ async function loadScreenshots() {
 // ================== SİSTEM KLASÖRÜ AÇMA ==================
 async function openSystemFolder(folderName) {
   await apiPost("/api/open-folder", { folder: folderName || "" }, 8000);
-}
-
-// ================== 3D SKIN GÖRÜNTÜLEYİCİ ==================
-function initSkinViewer(username) {
-  const canvas = document.getElementById("skinCanvas");
-  if (!canvas || typeof skinview3d === "undefined") return;
-
-  try {
-    state.skinViewer = new skinview3d.SkinViewer({
-      canvas: canvas,
-      width: 280,
-      height: 340,
-      skin: `https://mc-heads.net/skin/${encodeURIComponent(username || "Steve")}`
-    });
-
-    state.skinViewer.camera.position.set(0, 0, 60);
-    state.skinViewer.controls.enableRotate = true;
-    state.skinViewer.controls.enableZoom = true;
-    state.skinViewer.controls.enablePan = false;
-
-    setSkinAnimation("walk");
-    applySkinForUsername(username);
-  } catch (e) {
-    console.warn("3D SkinViewer başlatılamadı:", e);
-  }
-}
-
-function setSkinAnimation(animType) {
-  if (!state.skinViewer || typeof skinview3d === "undefined") return;
-  state.activeAnim = animType;
-
-  try {
-    if (animType === "walk") {
-      state.skinViewer.animation = new skinview3d.WalkingAnimation();
-      state.skinViewer.animation.speed = 0.6;
-    } else if (animType === "run") {
-      state.skinViewer.animation = new skinview3d.RunningAnimation();
-      state.skinViewer.animation.speed = 0.9;
-    } else if (animType === "wave") {
-      state.skinViewer.animation = new skinview3d.WaveAnimation();
-      state.skinViewer.animation.speed = 1.0;
-    } else {
-      state.skinViewer.animation = new skinview3d.IdleAnimation();
-      state.skinViewer.animation.speed = 0.4;
-    }
-  } catch (e) {
-    console.warn("Skin animasyonu değiştirilemedi:", e);
-  }
-}
-
-function updateSkinAvatar(username) {
-  applySkinForUsername(username);
-}
-
-async function applySkinForUsername(username) {
-  if (!state.skinViewer) return;
-  const clean = (username || "Steve").trim() || "Steve";
-
-  const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(clean)}`, 5000);
-
-  const modelSelect = document.getElementById("skinModelSelect");
-  if (modelSelect && info && info.model) {
-    modelSelect.value = info.model === "slim" ? "slim" : "default";
-  }
-
-  if (info && info.has_skin && info.skin_url) {
-    loadViewerSkin(`${API_BASE}${info.skin_url}?t=${Date.now()}`, clean);
-    return;
-  }
-  loadViewerSkin(`https://mc-heads.net/skin/${encodeURIComponent(clean)}`, clean);
-}
-
-function getSelectedSkinModel() {
-  const select = document.getElementById("skinModelSelect");
-  return select && select.value === "slim" ? "slim" : "default";
-}
-
-async function installSkinLoader() {
-  const target = getActiveInstance();
-  if (!target) {
-    showToast("Önce bir profil oluşturup aktif edin.", "info");
-    return;
-  }
-
-  const btn = document.getElementById("btnInstallSkinLoader");
-  const label = "🎮 Oyunda Da Göster (Skin Loader Kur)";
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "🎮 Kuruluyor...";
-  }
-
-  let data = await apiPost("/api/skin/loader/install", { instance_id: target.id }, 90000);
-
-  if (data && data.needs_confirm) {
-    const ok = await showConfirmDialog({
-      icon: "⚠️",
-      title: "Skin Loader Sürümü",
-      message: data.message || "Bu sürüm için resmi derleme yok; en yakın sürüm kurulacak.",
-      okText: "Yine de Kur"
-    });
-    if (!ok) {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = label;
-      }
-      return;
-    }
-    data = await apiPost("/api/skin/loader/install", { instance_id: target.id, force: true }, 90000);
-  }
-
-  if (btn) {
-    btn.disabled = false;
-    btn.textContent = label;
-  }
-
-  if (data && data.success) {
-    showToast(`✓ ${data.message || "Skin Loader kuruldu."}`, "success");
-    refreshInstalledContent();
-    loadInstances();
-  } else {
-    showToast(`⚠️ ${(data && data.error) || "Skin Loader kurulamadı."}`, "error");
-  }
-}
-
-async function applySkinPack() {
-  const target = getActiveInstance();
-  if (!target) {
-    showToast("Önce bir profil oluşturup aktif edin.", "info");
-    return;
-  }
-
-  const info = await apiGet(`/api/skin/info?username=${encodeURIComponent(state.username)}`, 5000);
-  if (!info || !info.has_skin) {
-    showToast("Önce bir skin yükleyin.", "info");
-    return;
-  }
-
-  const btn = document.getElementById("btnApplySkinPack");
-  const label = "🎮 Oyunda Göster (Doku Paketi)";
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "🎮 Uygulanıyor...";
-  }
-
-  const data = await apiPost("/api/skin/apply", {
-    instance_id: target.id,
-    username: state.username
-  }, 30000);
-
-  if (btn) {
-    btn.disabled = false;
-    btn.textContent = label;
-  }
-
-  if (data && data.success) {
-    localStorage.setItem(`cl_skin_pack_${target.id}`, "1");
-    showToast(`✓ ${data.message || "Skin oyunda görünecek."}`, "success");
-    refreshInstalledContent();
-    loadInstances();
-  } else {
-    showToast(`⚠️ ${(data && data.error) || "Doku paketi uygulanamadı."}`, "error");
-  }
-}
-
-async function maybeReapplySkinPack() {
-  const target = getActiveInstance();
-  if (!target) return;
-  if (localStorage.getItem(`cl_skin_pack_${target.id}`) !== "1") return;
-
-  const data = await apiPost("/api/skin/apply", {
-    instance_id: target.id,
-    username: state.username
-  }, 30000);
-  if (data && data.success) {
-    showToast("🎨 Oyundaki skin güncellendi.", "success");
-  }
-}
-
-function loadViewerSkin(url, fallbackName) {
-  if (!state.skinViewer) return;
-  try {
-    const result = state.skinViewer.loadSkin(url);
-    if (result && typeof result.catch === "function") {
-      result.catch(() => {
-        try {
-          state.skinViewer.loadSkin(`https://mc-heads.net/skin/${encodeURIComponent(fallbackName || "Steve")}`);
-        } catch (_) {}
-      });
-    }
-  } catch (_) {}
-}
-
-async function handleSkinFileSelected(e) {
-  const file = e.target.files && e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
-
-  if (!String(file.type).includes("png")) {
-    showToast("Lütfen PNG formatında bir skin dosyası seçin.", "error");
-    return;
-  }
-  if (file.size > 2 * 1024 * 1024) {
-    showToast("Skin dosyası en fazla 2 MB olabilir.", "error");
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const data = await apiPost("/api/skin/save", {
-      username: state.username,
-      data_url: reader.result,
-      model: getSelectedSkinModel()
-    }, 20000);
-    if (data && data.success) {
-      showToast("✓ Skin kaydedildi ve önizlemeye uygulandı.", "success");
-      applySkinForUsername(state.username);
-      maybeReapplySkinPack();
-    } else {
-      showToast(`⚠️ ${(data && data.error) || "Skin kaydedilemedi."}`, "error");
-    }
-  };
-  reader.readAsDataURL(file);
-}
-
-async function handleSkinUrlSave() {
-  const input = document.getElementById("skinUrlInput");
-  const url = ((input && input.value) || "").trim();
-  if (!url) {
-    showToast("Lütfen bir görsel URL'si girin.", "info");
-    return;
-  }
-  const data = await apiPost("/api/skin/save", {
-    username: state.username,
-    url: url,
-    model: getSelectedSkinModel()
-  }, 20000);
-  if (data && data.success) {
-    showToast("✓ Skin URL'den kaydedildi.", "success");
-    applySkinForUsername(state.username);
-    maybeReapplySkinPack();
-  } else {
-    showToast(`⚠️ ${(data && data.error) || "Skin indirilemedi."}`, "error");
-  }
 }
 
 // ================== TAURI NATIVE PENCERE KONTROLLERİ ==================

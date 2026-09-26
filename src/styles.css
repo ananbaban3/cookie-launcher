@@ -268,71 +268,12 @@ body {
 /* ================== PLAY TAB GRID ================== */
 .play-grid {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(0, 780px);
+  justify-content: center;
   gap: 28px;
   height: 100%;
   max-width: 1200px;
   margin: 0 auto;
-}
-
-/* 3D Skin Kartı */
-.skin-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.card-header h3 {
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.skin-canvas-wrapper {
-  flex: 1;
-  background: rgba(10, 10, 15, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  position: relative;
-}
-
-.skin-controls-row {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-}
-
-.btn-skin-anim {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-skin-anim:hover, .btn-skin-anim.active {
-  background: var(--accent-primary);
-  color: #fff;
-  border-color: var(--accent-primary);
 }
 
 /* Başlatma Kartı */
@@ -1863,48 +1804,6 @@ body::before {
   grid-column: 1 / -1;
 }
 
-/* ================== OFFLINE SKIN UI ================== */
-.skin-upload-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.skin-upload-row .btn-secondary {
-  flex: 1;
-  font-size: 11px;
-  padding: 8px 10px;
-}
-
-.skin-url-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.skin-url-row .styled-input {
-  padding: 8px 12px;
-  font-size: 12px;
-}
-
-.skin-hint {
-  font-size: 10px;
-  color: var(--text-dim);
-  text-align: center;
-  margin-top: 6px;
-}
-
-/* Hareket hassasiyeti olan kullanıcılar için animasyonları kıs */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001s !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001s !important;
-  }
-}
-
 /* ================== YÜKLÜ MOD DURUMU & GİZLEME ================== */
 .mod-hide-toggle {
   display: flex;
@@ -2240,54 +2139,4 @@ body::before {
   object-fit: cover;
   border: 1px solid var(--border-subtle);
   background: rgba(0, 0, 0, 0.25);
-}
-
-/* ================== OFFLINE SKIN / SKIN LOADER ================== */
-.skin-upload-row {
-  align-items: center;
-}
-
-.skin-model-select {
-  flex: 0 0 112px;
-  font-size: 11px;
-  padding: 7px 26px 7px 10px;
-}
-
-.skin-loader-btn {
-  width: 100%;
-  margin-top: 8px;
-  font-size: 11px;
-  padding: 9px 10px;
-  background: rgba(166, 227, 161, 0.1);
-  border-color: rgba(166, 227, 161, 0.35);
-}
-
-.skin-loader-btn:hover {
-  background: rgba(166, 227, 161, 0.22);
-}
-
-.skin-loader-btn:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-.skin-pack-btn {
-  background: rgba(166, 227, 161, 0.16);
-  border-color: rgba(166, 227, 161, 0.5);
-  font-weight: 700;
-}
-
-.skin-pack-btn:hover {
-  background: rgba(166, 227, 161, 0.3);
-}
-
-.skin-loader-adv-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--border-subtle);
-  font-size: 10px;
-  padding: 7px 10px;
-}
-
-.skin-loader-adv-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
 }

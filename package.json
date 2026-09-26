@@ -11,8 +11,5 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"
   },
-  "dependencies": {
-    "skinview3d": "^3.4.2",
-    "three": "^0.186.1"
-  }
+  "dependencies": {}
 }
