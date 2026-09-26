@@ -45,6 +45,10 @@ const state = {
   hideInstalled: localStorage.getItem("cl_hide_installed") === "true",
   installedModSlugs: new Set(),
   installedModFiles: [],
+  installedContent: { mod: [], shader: [], resourcepack: [] },
+  installedContentMeta: { mod: {}, shader: {}, resourcepack: {} },
+  installedCategory: "mod",
+  installedPanelCollapsed: false,
   coreModsWarned: false,
 
   // 3D Skin Viewer
@@ -307,16 +311,36 @@ function setupEventListeners() {
     });
   }
 
-  // Modrinth sonsuz kaydırma (infinite scroll)
-  const mainContent = document.querySelector(".main-content");
-  if (mainContent) {
-    mainContent.addEventListener("scroll", () => {
+  // Modrinth sonsuz kaydırma (infinite scroll) - keşfet alanı iç scroll
+  const discoverScroll = document.getElementById("modrinthDiscoverScroll") || document.querySelector(".main-content");
+  if (discoverScroll) {
+    discoverScroll.addEventListener("scroll", () => {
       const modrinthPane = document.getElementById("tab-modrinth");
       if (!modrinthPane || !modrinthPane.classList.contains("active")) return;
       if (!state.modrinthHasMore || state.modrinthLoading) return;
-      if (mainContent.scrollTop + mainContent.clientHeight >= mainContent.scrollHeight - 400) {
+      if (discoverScroll.scrollTop + discoverScroll.clientHeight >= discoverScroll.scrollHeight - 400) {
         fetchModrinth(false);
       }
+    });
+  }
+
+  // Yüklü içerik paneli: kategori sekmeleri ve daralt/genişlet
+  document.querySelectorAll(".installed-cat-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".installed-cat-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      state.installedCategory = tab.getAttribute("data-cat") || "mod";
+      renderInstalledPanel();
+    });
+  });
+
+  const btnToggleInstalled = document.getElementById("btnToggleInstalledPanel");
+  if (btnToggleInstalled) {
+    btnToggleInstalled.addEventListener("click", () => {
+      state.installedPanelCollapsed = !state.installedPanelCollapsed;
+      const panel = document.getElementById("installedPanel");
+      if (panel) panel.classList.toggle("collapsed", state.installedPanelCollapsed);
+      btnToggleInstalled.textContent = state.installedPanelCollapsed ? "▴" : "▾";
     });
   }
 
@@ -491,14 +515,14 @@ function setupEventListeners() {
 
       // Liste daha önce boş yüklendiyse önce yüklü modları tazele
       if (state.installedModSlugs.size === 0 && state.installedModFiles.length === 0) {
-        await refreshInstalledMods();
+        await refreshInstalledContent();
       }
       applyInstalledStates();
 
       showToast(
         state.hideInstalled
-          ? "Yüklü modlar listeden gizlendi."
-          : "Yüklü modlar tekrar gösteriliyor.",
+          ? "Yüklü içerikler listeden gizlendi."
+          : "Yüklü içerikler tekrar gösteriliyor.",
         "info"
       );
     });
@@ -535,7 +559,7 @@ function switchTab(tabId) {
     if (state.modrinthHits.length === 0) {
       fetchModrinth(true);
     } else {
-      refreshInstalledMods().then(applyInstalledStates);
+      refreshInstalledContent().then(applyInstalledStates);
     }
   } else if (tabId === "tab-gallery") {
     loadScreenshots();
@@ -576,6 +600,7 @@ async function loadInstances() {
   renderModrinthTargetBar();
   applyActiveInstanceToUI();
   ensurePackPolling();
+  refreshInstalledContent();
 }
 
 function ensurePackPolling() {
@@ -586,6 +611,7 @@ function ensurePackPolling() {
       if (!state.instances.some(i => i.install_status === "installing")) {
         clearInterval(state.packPollTimer);
         state.packPollTimer = null;
+        refreshInstalledContent();
         showToast("📦 Modpack kurulumu tamamlandı!", "success");
       }
     }, 3000);
@@ -896,7 +922,7 @@ function renderModrinthTargetBar() {
     select.appendChild(opt);
     select.disabled = true;
     if (loaderSelect) loaderSelect.disabled = false;
-    if (hint) hint.textContent = "Mod kurmak için önce bir profil oluşturun; modlar o profilin mods klasörüne kurulur.";
+    if (hint) hint.textContent = "İçerik kurmak için önce bir profil oluşturun; modlar/shaderlar/doku paketleri o profilin klasörüne kurulur.";
     return;
   }
 
@@ -919,7 +945,7 @@ function renderModrinthTargetBar() {
   }
 
   if (hint) {
-    const vanillaWarning = effective.loader === "vanilla" ? " ⚠️ Vanilla profillere mod kurulmaz." : "";
+    const vanillaWarning = (effective.loader === "vanilla" && state.modrinthType === "mod") ? " ⚠️ Vanilla profillere mod kurulmaz." : "";
     hint.textContent = `"${effective.name}" profiline kurulacak • MC ${effective.version} • ${effective.loader} • ${effective.mod_count || 0} mevcut mod${vanillaWarning}`;
   }
 }
@@ -1275,53 +1301,74 @@ function updateProgressUI(data) {
 }
 
 // ================== MODRINTH İÇERİK MERKEZİ ==================
-function isModInstalled(hit) {
-  if (!hit || hit.project_type === "modpack") return false;
+function contentCategoryFromType(type) {
+  if (type === "shader") return "shader";
+  if (type === "resourcepack") return "resourcepack";
+  return "mod";
+}
+
+function isContentInstalled(hit, category) {
+  if (!hit || category === "modpack") return false;
+  const cat = category || contentCategoryFromType(hit.project_type || state.modrinthType);
   const slug = String(hit.slug || "").toLowerCase();
   if (!slug) return false;
 
-  if (state.installedModSlugs.has(slug)) return true;
+  const meta = state.installedContentMeta[cat] || {};
+  if (meta[slug]) return true;
 
+  const files = (state.installedContent[cat] || []).map(f => String(f.name || "").toLowerCase());
   const patterns = [slug, slug.replace(/-/g, "_"), slug.replace(/_/g, "-")];
-  return state.installedModFiles.some(file => {
-    const name = String(file).toLowerCase();
-    return patterns.some(p =>
+  return files.some(name =>
+    patterns.some(p =>
       name === `${p}.jar` ||
+      name === `${p}.zip` ||
       name.startsWith(`${p}-`) ||
       name.startsWith(`${p}_`) ||
       name.includes(`-${p}-`) ||
       name.includes(`_${p}_`)
-    );
-  });
+    )
+  );
 }
 
-async function refreshInstalledMods() {
+async function refreshInstalledContent() {
   state.installedModSlugs = new Set();
   state.installedModFiles = [];
+  state.installedContent = { mod: [], shader: [], resourcepack: [] };
+  state.installedContentMeta = { mod: {}, shader: {}, resourcepack: {} };
 
   const target = getModrinthTarget();
+  renderInstalledPanel();
   if (!target) return;
 
-  const data = await apiGet(`/api/instances/mods?instance_id=${encodeURIComponent(target.id)}`, 8000);
+  const data = await apiGet(`/api/instances/content?instance_id=${encodeURIComponent(target.id)}`, 8000);
   if (!data || data.success !== true) {
-    // Core eski sürümdeyse (endpoint yoksa) kullanıcıyı bir kez bilgilendir
     if (!state.coreModsWarned) {
       state.coreModsWarned = true;
-      showToast("Core güncel değil: yüklü mod tespiti için launcher'ı yeniden başlatın.", "info");
+      showToast("Core güncel değil: yüklü içerik listesi için launcher'ı yeniden başlatın.", "info");
     }
     return;
   }
 
-  const manifest = data.manifest || {};
-  Object.keys(manifest).forEach(slug => state.installedModSlugs.add(String(slug).toLowerCase()));
-  state.installedModFiles = Array.isArray(data.files) ? data.files : [];
+  const categories = data.categories || {};
+  ["mod", "shader", "resourcepack"].forEach(cat => {
+    const files = (categories[cat] && categories[cat].files) || [];
+    state.installedContent[cat] = Array.isArray(files) ? files : [];
+    state.installedContent[cat].forEach(f => {
+      if (f && f.slug) state.installedContentMeta[cat][String(f.slug).toLowerCase()] = f;
+    });
+  });
+
+  state.installedModSlugs = new Set(Object.keys(state.installedContentMeta.mod));
+  state.installedModFiles = state.installedContent.mod.map(f => f.name);
+  renderInstalledPanel();
 }
 
 function applyInstalledStates() {
   document.querySelectorAll(".mod-card[data-slug]").forEach(card => {
     const slug = card.getAttribute("data-slug");
-    const installed = state.installedModSlugs.has(String(slug).toLowerCase()) ||
-      isModInstalled({ slug: slug, project_type: "mod" });
+    const type = card.getAttribute("data-project-type") || "mod";
+    const installed = type !== "modpack" &&
+      isContentInstalled({ slug: slug, project_type: type }, contentCategoryFromType(type));
 
     if (installed) {
       card.classList.add("installed");
@@ -1346,14 +1393,151 @@ function applyInstalledStates() {
   });
 }
 
+function renderInstalledPanel() {
+  const wrap = document.getElementById("installedListWrap");
+  if (!wrap) return;
+
+  const target = getModrinthTarget();
+  const profileEl = document.getElementById("installedPanelProfile");
+  if (profileEl) profileEl.textContent = target ? `— ${target.name}` : "— profil seçilmedi";
+
+  const counts = {
+    mod: (state.installedContent.mod || []).length,
+    shader: (state.installedContent.shader || []).length,
+    resourcepack: (state.installedContent.resourcepack || []).length
+  };
+  const setCount = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  setCount("installedCountMod", counts.mod);
+  setCount("installedCountShader", counts.shader);
+  setCount("installedCountResourcepack", counts.resourcepack);
+
+  const cat = state.installedCategory || "mod";
+  const files = state.installedContent[cat] || [];
+  wrap.innerHTML = "";
+
+  if (!target) {
+    wrap.innerHTML = `<div class="installed-empty">Yönetmek için üstten bir kurulum hedefi (profil) seçin.</div>`;
+    return;
+  }
+  if (files.length === 0) {
+    const labels = { mod: "mod", shader: "shader", resourcepack: "doku paketi" };
+    wrap.innerHTML = `<div class="installed-empty">Bu profilde henüz ${labels[cat]} yok.</div>`;
+    return;
+  }
+
+  const icons = { mod: "🧩", shader: "✨", resourcepack: "🎨" };
+
+  files.forEach(f => {
+    const row = document.createElement("div");
+    row.className = "installed-row";
+
+    const sizeText = f.size >= 1048576
+      ? `${(f.size / 1048576).toFixed(1)} MB`
+      : `${Math.max(1, Math.round((f.size || 0) / 1024))} KB`;
+
+    const metaParts = [];
+    if (f.slug) metaParts.push(f.slug);
+    if (f.version) metaParts.push(`v${f.version}`);
+    metaParts.push(sizeText);
+
+    row.innerHTML = `
+      <span class="installed-row-icon">${icons[cat]}</span>
+      <div class="installed-row-info">
+        <div class="installed-row-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+        <div class="installed-row-meta">${escapeHtml(metaParts.join(" • "))}</div>
+      </div>
+    `;
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn-installed-delete";
+    delBtn.title = "Bu içeriği profilden kaldır";
+    delBtn.textContent = "🗑️";
+    delBtn.addEventListener("click", () => deleteInstalledContent(cat, f.name));
+    row.appendChild(delBtn);
+
+    wrap.appendChild(row);
+  });
+}
+
+async function deleteInstalledContent(category, name) {
+  const target = getModrinthTarget();
+  if (!target) return;
+
+  const ok = await showConfirmDialog({
+    icon: "🗑️",
+    title: "İçerik Silinsin mi?",
+    message: `"${name}" dosyası "${target.name}" profilinden kalıcı olarak silinecek. Bu işlem geri alınamaz.`,
+    okText: "Sil",
+    danger: true
+  });
+  if (!ok) return;
+
+  const data = await apiPost("/api/instances/content/delete", {
+    instance_id: target.id,
+    category: category,
+    name: name
+  }, 15000);
+
+  if (data && data.success) {
+    showToast(`🗑️ ${name} silindi.`, "success");
+    await refreshInstalledContent();
+    applyInstalledStates();
+    loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Dosya silinemedi."}`, "error");
+  }
+}
+
+function showConfirmDialog(options = {}) {
+  return new Promise(resolve => {
+    const modal = document.getElementById("confirmModal");
+    if (!modal) {
+      resolve(window.confirm(options.message || ""));
+      return;
+    }
+
+    const iconEl = document.getElementById("confirmModalIcon");
+    const titleEl = document.getElementById("confirmModalTitle");
+    const msgEl = document.getElementById("confirmModalMessage");
+    const okBtn = document.getElementById("btnConfirmOk");
+    const cancelBtn = document.getElementById("btnConfirmCancel");
+
+    if (iconEl) iconEl.textContent = options.icon || "⚠️";
+    if (titleEl) titleEl.textContent = options.title || "Emin misiniz?";
+    if (msgEl) msgEl.textContent = options.message || "";
+    if (okBtn) {
+      okBtn.textContent = options.okText || "Onayla";
+      okBtn.className = options.danger ? "btn-confirm-danger" : "btn-primary-action";
+    }
+
+    const cleanup = (value) => {
+      modal.style.display = "none";
+      if (okBtn) okBtn.removeEventListener("click", onOk);
+      if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
+      resolve(value);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+
+    if (okBtn) okBtn.addEventListener("click", onOk);
+    if (cancelBtn) cancelBtn.addEventListener("click", onCancel);
+    modal.style.display = "flex";
+  });
+}
+
 function buildModCard(hit, index) {
   const target = getModrinthTarget();
   const isModpack = (hit.project_type === "modpack") || (state.modrinthType === "modpack");
-  const installed = !isModpack && isModInstalled(hit);
+  const category = contentCategoryFromType(hit.project_type || state.modrinthType);
+  const installed = !isModpack && isContentInstalled(hit, category);
 
   const card = document.createElement("div");
   card.className = "mod-card" + (installed ? " installed" : "");
   card.dataset.slug = hit.slug || "";
+  card.dataset.projectType = isModpack ? "modpack" : category;
   card.style.animationDelay = `${Math.min(index * 0.03, 0.5)}s`;
 
   const iconBox = document.createElement("div");
@@ -1385,7 +1569,7 @@ function buildModCard(hit, index) {
       <span style="font-size: 11px; color: var(--text-muted);">⬇ ${(hit.downloads || 0).toLocaleString()}</span>
       ${installed ? '<span class="mod-installed-chip">✓ Bu profilde yüklü</span>' : ""}
       ${!installed && target ? `<span class="mod-target-chip" title="Kurulum hedefi: ${escapeHtml(target.name)}">📥 ${escapeHtml(target.name)}</span>` : ""}
-      <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : "mod"}">${buttonLabel}</button>
+      <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : category}">${buttonLabel}</button>
     </div>
   `;
 
@@ -1442,7 +1626,7 @@ async function fetchModrinth(reset = true) {
     state.modrinthHits = [];
     state.modrinthHasMore = true;
     wrap.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
-    await refreshInstalledMods();
+    await refreshInstalledContent();
   } else {
     updateModrinthFooter();
   }
@@ -1506,9 +1690,51 @@ async function installModrinthProject(hit, buttonEl) {
   const isModpack = (hit.project_type === "modpack") || (state.modrinthType === "modpack");
   if (isModpack) {
     await installModpackAsProfile(hit, buttonEl);
-  } else {
-    await downloadModrinthProject(hit.slug, buttonEl);
+    return;
   }
+
+  const category = contentCategoryFromType(hit.project_type || state.modrinthType);
+  const target = getModrinthTarget();
+
+  // Hedef profil yoksa sessizce nereye kurulacağı belirsiz olmasın: profil oluşturmaya yönlendir
+  if (!target) {
+    showToast("İçerik kurmak için önce bir profil oluşturun.", "info");
+    openCreateInstanceModal();
+    return;
+  }
+
+  if (category === "mod" && target.loader === "vanilla") {
+    showToast("Vanilla profil mod yüklemez. PROFİLLER sekmesinden Fabric/Forge profili seçin.", "info");
+    return;
+  }
+
+  // Shader / doku paketlerinde sürüm tam eşleşmiyorsa kullanıcıdan onay al
+  if (category !== "mod") {
+    const params = new URLSearchParams({
+      slug: hit.slug || "",
+      version: target.version || "",
+      type: category,
+      loader: target.loader || ""
+    });
+    const check = await apiGet(`/api/modrinth/check?${params.toString()}`, 12000);
+
+    if (check && check.has_file === false) {
+      showToast("Bu paket için indirilebilir dosya bulunamadı.", "error");
+      return;
+    }
+
+    if (check && check.has_file && !check.exact_match) {
+      const ok = await showConfirmDialog({
+        icon: "⚠️",
+        title: "Sürüm Tam Eşleşmiyor",
+        message: `Bu paket oyun sürümünüzle (MC ${target.version}) tam eşleşmiyor (en yakın: ${check.matched_game_version || "bilinmiyor"}). Çoğu zaman sorunsuz çalışır. Yine de indirmek ister misiniz?`,
+        okText: "Yine de İndir"
+      });
+      if (!ok) return;
+    }
+  }
+
+  await downloadModrinthProject(hit, buttonEl, { category, force: category !== "mod" });
 }
 
 async function installModpackAsProfile(hit, buttonEl) {
@@ -1543,20 +1769,17 @@ async function installModpackAsProfile(hit, buttonEl) {
   }
 }
 
-async function downloadModrinthProject(slug, buttonEl) {
+async function downloadModrinthProject(hit, buttonEl, opts = {}) {
+  const slug = typeof hit === "string" ? hit : (hit && hit.slug);
   if (!slug) return;
 
+  const category = opts.category || "mod";
+  const force = opts.force === true;
   const target = getModrinthTarget();
 
-  // Hedef profil yoksa sessizce nereye kurulacağı belirsiz olmasın: profil oluşturmaya yönlendir
   if (!target) {
-    showToast("Mod kurmak için önce bir profil oluşturun.", "info");
+    showToast("İçerik kurmak için önce bir profil oluşturun.", "info");
     openCreateInstanceModal();
-    return;
-  }
-
-  if (target.loader === "vanilla") {
-    showToast("Vanilla profil mod yüklemez. PROFİLLER sekmesinden Fabric/Forge profili seçin.", "info");
     return;
   }
 
@@ -1566,14 +1789,35 @@ async function downloadModrinthProject(slug, buttonEl) {
     buttonEl.textContent = "Kuruluyor...";
   }
 
-  showToast(`📥 ${slug} → "${target.name}" profiline indiriliyor...`, "info");
+  const typeLabels = { mod: "Mod", shader: "Shader", resourcepack: "Doku paketi" };
+  showToast(`📥 ${typeLabels[category] || "İçerik"} → "${target.name}" profiline indiriliyor...`, "info");
 
   const data = await apiPost("/api/modrinth/install", {
     slug: slug,
     version: target.version,
     loader: target.loader,
-    instance_id: target.id
-  }, 120000);
+    instance_id: target.id,
+    project_type: category,
+    force: force
+  }, 180000);
+
+  // Backend tam uyum olmadigini bildirdiyse onay isteyip tekrar dene
+  if (data && data.needs_confirm) {
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = originalText || "⚡ Hızlı Kur";
+    }
+    const ok = await showConfirmDialog({
+      icon: "⚠️",
+      title: "Sürüm Tam Eşleşmiyor",
+      message: `${data.message || "Bu paket sürümünüzle tam eşleşmiyor olabilir."} Yine de indirmek ister misiniz?`,
+      okText: "Yine de İndir"
+    });
+    if (ok) {
+      await downloadModrinthProject(hit, buttonEl, { category, force: true });
+    }
+    return;
+  }
 
   if (buttonEl) {
     buttonEl.disabled = false;
@@ -1581,14 +1825,15 @@ async function downloadModrinthProject(slug, buttonEl) {
   }
 
   if (data && data.success) {
-    showToast(`✓ ${data.filename || slug} → "${target.name}" profiline kuruldu.`, "success");
-    await refreshInstalledMods();
+    const warning = data.exact_match === false ? " (sürüm tam eşleşmiyor)" : "";
+    showToast(`✓ ${data.filename || slug} → "${target.name}" profiline kuruldu${warning}.`, "success");
+    await refreshInstalledContent();
     applyInstalledStates();
     loadInstances();
   } else if (data && data.error) {
     showToast(`⚠️ ${data.error}`, "error");
   } else {
-    showToast("⚠️ Mod indirme isteği tamamlanamadı, tekrar deneyin.", "error");
+    showToast("⚠️ İndirme isteği tamamlanamadı, tekrar deneyin.", "error");
   }
 }
 

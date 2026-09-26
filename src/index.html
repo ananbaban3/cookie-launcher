@@ -55,7 +55,7 @@
         </button>
         <button class="nav-tab" data-tab="tab-modrinth">
           <span class="nav-icon">🧩</span>
-          <span>MODRINTH KEŞFET</span>
+          <span>MODLAR &amp; PAKETLER</span>
         </button>
         <button class="nav-tab" data-tab="tab-gallery">
           <span class="nav-icon">📸</span>
@@ -252,66 +252,83 @@
         <div class="instances-grid" id="instancesGridWrap"></div>
       </section>
 
-      <!-- =================== SEKME 3: MODRINTH KEŞFET =================== -->
+      <!-- =================== SEKME 3: MODLAR & PAKETLER =================== -->
       <section class="tab-pane" id="tab-modrinth">
-        <div class="section-titlebar">
-          <div>
-            <h2 class="title-text">Modrinth İçerik Merkezi</h2>
-            <p class="subtitle-text">Minecraft için yüzbinlerce mod, modpack, shader ve doku paketini tek tıkla kurun.</p>
+        <!-- ÜST: Keşfet / İndir -->
+        <div class="mod-discover-area" id="modrinthDiscoverScroll">
+          <div class="section-titlebar">
+            <div>
+              <h2 class="title-text">Modrinth İçerik Merkezi</h2>
+              <p class="subtitle-text">Yüzbinlerce mod, modpack, shader ve doku paketini tek tıkla kurun.</p>
+            </div>
+            <div class="search-box">
+              <input type="text" id="modrinthSearchInput" class="styled-input search-input" placeholder="Mod veya paket ara...">
+              <button class="btn-search-go" id="btnDoSearch">🔍</button>
+            </div>
           </div>
-          <div class="search-box">
-            <input type="text" id="modrinthSearchInput" class="styled-input search-input" placeholder="Mod veya paket ara...">
-            <button class="btn-search-go" id="btnDoSearch">🔍</button>
+
+          <!-- Kategori Butonları -->
+          <div class="cat-pill-row">
+            <button class="cat-pill active" data-type="mod">🧩 Modlar</button>
+            <button class="cat-pill" data-type="modpack">📦 Mod Paketleri</button>
+            <button class="cat-pill" data-type="shader">✨ Shaderlar</button>
+            <button class="cat-pill" data-type="resourcepack">🎨 Doku Paketleri</button>
+          </div>
+
+          <!-- Filtre Seçimleri -->
+          <div class="modrinth-filter-bar">
+            <div class="m-filter-group">
+              <label>Yükleyici:</label>
+              <select id="modrinthLoaderSelect" class="styled-select">
+                <option value="fabric">Fabric</option>
+                <option value="forge">Forge</option>
+                <option value="Tümü">Tümü</option>
+              </select>
+            </div>
+            <div class="m-filter-group">
+              <label>Sıralama:</label>
+              <select id="modrinthSortSelect" class="styled-select">
+                <option value="downloads">En Çok İndirilen</option>
+                <option value="relevance">Alaka Düzeyi</option>
+                <option value="newest">En Yeni</option>
+              </select>
+            </div>
+            <div class="m-filter-group">
+              <label class="mod-hide-toggle" title="Profilde zaten yüklü olan içerikleri listeden gizler">
+                <input type="checkbox" id="hideInstalledToggle">
+                <span>🚫 İndirilenleri gizle</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Kurulum Hedefi (Profil) Çubuğu -->
+          <div class="modrinth-target-bar">
+            <span class="target-label">📥 Kurulum Hedefi:</span>
+            <select id="modrinthInstanceSelect" class="styled-select"></select>
+            <span class="target-hint" id="modrinthTargetHint">İçerikler seçilen profilin klasörüne kurulur.</span>
+          </div>
+
+          <!-- Kart Grid Listesi -->
+          <div class="modrinth-cards-grid" id="modrinthResultsWrap">
+            <div class="loading-state">
+              <div class="spinner"></div>
+              <span>İçerikler taranıyor...</span>
+            </div>
           </div>
         </div>
 
-        <!-- Kategori Butonları -->
-        <div class="cat-pill-row">
-          <button class="cat-pill active" data-type="mod">🧩 Modlar</button>
-          <button class="cat-pill" data-type="modpack">📦 Mod Paketleri</button>
-          <button class="cat-pill" data-type="shader">✨ Shaderlar</button>
-          <button class="cat-pill" data-type="resourcepack">🎨 Doku Paketleri</button>
-        </div>
-
-        <!-- Filtre Seçimleri -->
-        <div class="modrinth-filter-bar">
-          <div class="m-filter-group">
-            <label>Yükleyici:</label>
-            <select id="modrinthLoaderSelect" class="styled-select">
-              <option value="fabric">Fabric</option>
-              <option value="forge">Forge</option>
-              <option value="Tümü">Tümü</option>
-            </select>
+        <!-- ALT: Yönet / Sil -->
+        <div class="installed-panel" id="installedPanel">
+          <div class="installed-panel-header">
+            <span class="installed-panel-title">📦 Yüklü İçerikler <span class="installed-profile-name" id="installedPanelProfile">— profil seçilmedi</span></span>
+            <div class="installed-cat-tabs">
+              <button class="installed-cat-tab active" data-cat="mod">Modlar <span id="installedCountMod">0</span></button>
+              <button class="installed-cat-tab" data-cat="shader">Shaderlar <span id="installedCountShader">0</span></button>
+              <button class="installed-cat-tab" data-cat="resourcepack">Doku Paketleri <span id="installedCountResourcepack">0</span></button>
+            </div>
+            <button class="btn-installed-collapse" id="btnToggleInstalledPanel" title="Paneli daralt / genişlet">▾</button>
           </div>
-          <div class="m-filter-group">
-            <label>Sıralama:</label>
-            <select id="modrinthSortSelect" class="styled-select">
-              <option value="downloads">En Çok İndirilen</option>
-              <option value="relevance">Alaka Düzeyi</option>
-              <option value="newest">En Yeni</option>
-            </select>
-          </div>
-          <div class="m-filter-group">
-            <label class="mod-hide-toggle" title="Profilde zaten yüklü olan modları listeden gizler">
-              <input type="checkbox" id="hideInstalledToggle">
-              <span>🚫 İndirilenleri gizle</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Kurulum Hedefi (Profil) Çubuğu -->
-        <div class="modrinth-target-bar">
-          <span class="target-label">📥 Kurulum Hedefi:</span>
-          <select id="modrinthInstanceSelect" class="styled-select"></select>
-          <span class="target-hint" id="modrinthTargetHint">Modlar seçilen profilin mods klasörüne kurulur.</span>
-        </div>
-
-        <!-- Kart Grid Listesi -->
-        <div class="modrinth-cards-grid" id="modrinthResultsWrap">
-          <div class="loading-state">
-            <div class="spinner"></div>
-            <span>İçerikler taranıyor...</span>
-          </div>
+          <div class="installed-list" id="installedListWrap"></div>
         </div>
       </section>
 
@@ -413,6 +430,21 @@
         <div class="ci-actions">
           <button class="btn-secondary" id="btnCancelCreateInstance">Vazgeç</button>
           <button class="btn-primary-action" id="btnConfirmCreateInstance">Oluştur ve Aktif Yap</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== MODAL: ONAY / UYARI =================== -->
+  <div class="modal-backdrop" id="confirmModal" style="display: none;">
+    <div class="modal-window confirm-modal-window">
+      <div class="confirm-modal-inner">
+        <div class="confirm-icon" id="confirmModalIcon">⚠️</div>
+        <h3 class="confirm-title" id="confirmModalTitle">Emin misiniz?</h3>
+        <p class="confirm-message" id="confirmModalMessage"></p>
+        <div class="confirm-actions">
+          <button class="btn-secondary" id="btnConfirmCancel">Vazgeç</button>
+          <button class="btn-primary-action" id="btnConfirmOk">Onayla</button>
         </div>
       </div>
     </div>

@@ -705,6 +705,70 @@ class ModrinthFetcher:
         return None
 
     @classmethod
+    def get_project_file(cls, project_slug, game_version, project_type="shader", loader="", allow_fallback=False):
+        """
+        Modrinth projesinin dosyasini bulur.
+        - mod: yukleyici + oyun surumu tam eslesme aranir.
+        - shader/resourcepack: once tam eslesme, yoksa (allow_fallback) en yeni surum.
+        Donen sozlukte exact_match alani bulunur.
+        """
+        clean_gv = clean_minecraft_version(game_version)
+        cache_key = f"file::{project_slug}::{clean_gv}::{project_type}::{loader.lower()}"
+        cache = cls.load_cache()
+        if cache_key in cache:
+            cached = cache[cache_key]
+            if cached is None or isinstance(cached, dict):
+                return cached
+
+        chosen = None
+        try:
+            resp = requests.get(
+                f"{cls.BASE_URL}/project/{project_slug}/version",
+                headers=cls.HEADERS,
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                versions = resp.json()
+                if isinstance(versions, list):
+                    exact = None
+                    fallback = None
+                    for v in versions:
+                        files = v.get("files") or []
+                        primary = next((f for f in files if f.get("primary")), files[0] if files else None)
+                        if not primary or not primary.get("url"):
+                            continue
+
+                        if project_type == "mod":
+                            loaders = [str(l).lower() for l in (v.get("loaders") or [])]
+                            if loader and loader.lower() not in loaders:
+                                continue
+
+                        gvs = v.get("game_versions") or []
+                        entry = {
+                            "filename": primary.get("filename"),
+                            "url": primary.get("url"),
+                            "size": primary.get("size", 0),
+                            "version_number": v.get("version_number"),
+                            "game_versions": gvs,
+                            "exact_match": clean_gv in gvs,
+                        }
+                        if entry["exact_match"]:
+                            exact = entry
+                            break
+                        if fallback is None:
+                            fallback = entry
+
+                    chosen = exact or (fallback if allow_fallback else None)
+        except Exception as e:
+            add_log(f"Modrinth dosya bilgisi uyarisi ({project_slug}): {e}")
+
+        if chosen:
+            with cls._cache_lock:
+                cls._cache[cache_key] = chosen
+            cls.save_cache()
+        return chosen
+
+    @classmethod
     def download_file(cls, url, dest_path):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         part_path = dest_path + ".part"
@@ -850,58 +914,163 @@ def update_instance_config(inst_id, updates):
 
 
 def register_installed_mod(inst_id, slug, filename, version=""):
-    """Profile kurulan modlari mods_manifest.json'a kaydeder.
-    Boylece Modrinth ekraninda 'yuklu' tespiti dosya adi tahminine kalmaz."""
+    """Geriye donuk uyumluluk: mod kaydini icerik manifestine yazar."""
+    register_installed_content(inst_id, "mod", slug, filename, version)
+
+
+# ==================== ICERIK (MOD/SHADER/DOKU) YONETIMI ====================
+CATEGORY_DIRS = {
+    "mod": "mods",
+    "shader": "shaderpacks",
+    "resourcepack": "resourcepacks",
+}
+
+
+def normalize_category(category):
+    c = str(category or "mod").strip().lower()
+    if c in ("shader", "shaderpack", "shaderpacks", "shaders"):
+        return "shader"
+    if c in ("resourcepack", "resourcepacks", "texturepack", "texturepacks", "texture"):
+        return "resourcepack"
+    return "mod"
+
+
+def load_content_manifest(inst_id):
     inst_dir = get_instance_dir(inst_id)
-    if not inst_dir or not slug:
-        return
-    manifest_path = os.path.join(inst_dir, "mods_manifest.json")
-    data = {}
-    if os.path.exists(manifest_path):
+    data = {"mod": {}, "shader": {}, "resourcepack": {}}
+    if not inst_dir:
+        return data
+
+    path = os.path.join(inst_dir, "content_manifest.json")
+    if os.path.exists(path):
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                data = {}
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                for cat in data:
+                    entries = raw.get(cat)
+                    if isinstance(entries, dict):
+                        data[cat] = entries
         except Exception:
-            data = {}
-    data[str(slug)] = {
-        "filename": filename,
-        "version": version,
-        "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+            pass
+
+    # Eski mods_manifest.json dosyasini da birlestir
+    legacy = os.path.join(inst_dir, "mods_manifest.json")
+    if os.path.exists(legacy):
+        try:
+            with open(legacy, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                for slug, entry in raw.items():
+                    data["mod"].setdefault(slug, entry)
+        except Exception:
+            pass
+
+    return data
+
+
+def save_content_manifest(inst_id, data):
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return
     try:
-        with open(manifest_path, "w", encoding="utf-8") as f:
+        with open(os.path.join(inst_dir, "content_manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except Exception:
         pass
 
 
-def get_instance_mod_manifest(inst_id):
-    """Profilin mod manifestini ve mods klasorundeki jar dosyalarini dondurur."""
+def register_installed_content(inst_id, category, slug, filename, version=""):
+    """Profile kurulan mod/shader/doku paketini content_manifest.json'a kaydeder."""
     inst_dir = get_instance_dir(inst_id)
-    manifest = {}
-    files = []
+    if not inst_dir or not slug:
+        return
+    cat = normalize_category(category)
+    data = load_content_manifest(inst_id)
+    data.setdefault(cat, {})
+    data[cat][str(slug)] = {
+        "filename": filename,
+        "version": version,
+        "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_content_manifest(inst_id, data)
+
+
+def get_instance_content(inst_id):
+    """Profilin mods / shaderpacks / resourcepacks icerigini listeler."""
+    inst_dir = get_instance_dir(inst_id)
+    manifest = load_content_manifest(inst_id)
+    content = {}
+
+    for cat, subdir in CATEGORY_DIRS.items():
+        files = []
+        by_filename = {}
+        for slug, entry in (manifest.get(cat) or {}).items():
+            if isinstance(entry, dict) and entry.get("filename"):
+                by_filename[str(entry["filename"]).lower()] = (slug, entry.get("version", ""))
+
+        folder = os.path.join(inst_dir, subdir) if inst_dir else None
+        if folder and os.path.isdir(folder):
+            try:
+                for f in sorted(os.listdir(folder)):
+                    fp = os.path.join(folder, f)
+                    if not os.path.isfile(fp):
+                        continue
+                    try:
+                        st = os.stat(fp)
+                    except OSError:
+                        continue
+                    slug, version = by_filename.get(f.lower(), ("", ""))
+                    files.append({
+                        "name": f,
+                        "size": st.st_size,
+                        "mtime": st.st_mtime,
+                        "slug": slug,
+                        "version": version,
+                    })
+            except Exception:
+                pass
+
+        content[cat] = {"dir": subdir, "files": files}
+
+    return content
+
+
+def delete_instance_content(inst_id, category, name):
+    """Profildeki tek bir icerik dosyasini siler ve manifesti gunceller."""
+    inst_dir = get_instance_dir(inst_id)
     if not inst_dir:
-        return manifest, files
+        return False, "Profil bulunamadı."
 
-    manifest_path = os.path.join(inst_dir, "mods_manifest.json")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-            if not isinstance(manifest, dict):
-                manifest = {}
-        except Exception:
-            manifest = {}
+    raw_name = str(name or "").strip()
+    safe = os.path.basename(raw_name)
+    if not safe or safe != raw_name:
+        return False, "Geçersiz dosya adı."
 
-    mods_dir = os.path.join(inst_dir, "mods")
-    if os.path.isdir(mods_dir):
-        try:
-            files = [f for f in os.listdir(mods_dir) if f.lower().endswith(".jar")]
-        except Exception:
-            files = []
+    cat = normalize_category(category)
+    target = os.path.join(inst_dir, CATEGORY_DIRS[cat], safe)
+    if not os.path.isfile(target):
+        return False, "Dosya bulunamadı."
 
+    try:
+        os.remove(target)
+    except Exception as e:
+        return False, f"Dosya silinemedi: {e}"
+
+    data = load_content_manifest(inst_id)
+    entries = data.get(cat) or {}
+    for slug in [s for s, e in entries.items()
+                 if isinstance(e, dict) and str(e.get("filename", "")).lower() == safe.lower()]:
+        entries.pop(slug, None)
+    save_content_manifest(inst_id, data)
+    return True, safe
+
+
+def get_instance_mod_manifest(inst_id):
+    """Geriye donuk uyumluluk: mod manifesti + jar dosya adlari."""
+    content = get_instance_content(inst_id)
+    manifest = load_content_manifest(inst_id).get("mod", {})
+    files = [f["name"] for f in content.get("mod", {}).get("files", [])]
     return manifest, files
 
 
@@ -1459,6 +1628,38 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(res)
                 return
 
+            # 4b. Modrinth Surum Uyum Kontrolu (shader/doku icin yumusak)
+            if path == "/modrinth/check":
+                slug = query.get("slug", [""])[0].strip()
+                gv = query.get("version", [""])[0]
+                ptype = normalize_category(query.get("type", ["mod"])[0])
+                loader = query.get("loader", ["fabric"])[0]
+
+                if not slug:
+                    self.send_json({"success": False, "error": "slug gerekli"})
+                    return
+
+                info = None
+                try:
+                    if ptype == "mod":
+                        info = ModrinthFetcher.get_latest_mod_jar(slug, gv, loader=loader)
+                    else:
+                        info = ModrinthFetcher.get_project_file(
+                            slug, gv, project_type=ptype, loader=loader, allow_fallback=True
+                        )
+                except Exception:
+                    info = None
+
+                exact = bool(info and (ptype == "mod" or info.get("exact_match")))
+                self.send_json({
+                    "success": True,
+                    "has_file": bool(info),
+                    "exact_match": exact,
+                    "matched_game_version": (info.get("game_versions") or [""])[0] if info else "",
+                    "filename": (info or {}).get("filename", ""),
+                })
+                return
+
             # 5. Oyun Ici Ekran Goruntuleri
             if path == "/screenshots":
                 sc_dir = os.path.join(minecraft_directory, "screenshots")
@@ -1489,6 +1690,16 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "instance_id": inst_id,
                     "manifest": manifest,
                     "files": files,
+                })
+                return
+
+            # 6c. Profildeki Tum Icerik (mod / shader / doku paketi)
+            if path == "/instances/content":
+                inst_id = query.get("instance_id", [""])[0]
+                self.send_json({
+                    "success": True,
+                    "instance_id": inst_id,
+                    "categories": get_instance_content(inst_id),
                 })
                 return
 
@@ -1596,19 +1807,22 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 return
 
-            # 2. Modrinth Mod Kurulumu (Kullanicinin Secili Profiline Kurulur)
+            # 2. Modrinth Icerik Kurulumu (mod / shader / doku paketi)
             if path in ("/modrinth/install", "/modrinth/install/"):
                 slug = (body.get("slug") or "").strip()
                 raw_ver = (body.get("version") or "1.20.4").strip()
                 loader = (body.get("loader") or "fabric").lower()
                 instance_id = body.get("instance_id")
+                project_type = normalize_category(body.get("project_type") or body.get("content_type") or "mod")
+                force = bool(body.get("force"))
+                category_dir = CATEGORY_DIRS[project_type]
 
                 if not slug:
-                    self.send_json({"success": False, "error": "Mod kimliği (slug) belirtilmedi."})
+                    self.send_json({"success": False, "error": "İçerik kimliği (slug) belirtilmedi."})
                     return
 
                 clean_v = clean_minecraft_version(raw_ver)
-                target_label = f"Genel .minecraft (MC {clean_v})"
+                target_label = "Genel .minecraft"
 
                 if instance_id:
                     inst = load_instance_config(instance_id)
@@ -1617,51 +1831,90 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         return
                     clean_v = clean_minecraft_version(inst.get("version") or raw_ver)
                     loader = (inst.get("loader") or loader).lower()
-                    target_mods = os.path.join(get_instance_dir(instance_id), "mods")
+                    target_dir = os.path.join(get_instance_dir(instance_id), category_dir)
                     target_label = f"{inst.get('name')} profili (MC {clean_v} • {loader})"
                 else:
-                    target_mods = os.path.join(minecraft_directory, "mods", clean_v)
+                    if project_type == "mod":
+                        target_dir = os.path.join(minecraft_directory, "mods", clean_v)
+                        target_label = f"Genel .minecraft (MC {clean_v})"
+                    else:
+                        target_dir = os.path.join(minecraft_directory, category_dir)
 
-                os.makedirs(target_mods, exist_ok=True)
+                os.makedirs(target_dir, exist_ok=True)
 
                 try:
                     info = None
-                    curated_key = (clean_v, loader)
-                    if curated_key in CURATED_OPTIMIZATION_MAP:
-                        for item in CURATED_OPTIMIZATION_MAP[curated_key]:
-                            if item["slug"] == slug:
-                                info = item
-                                break
 
-                    if not info:
-                        info = ModrinthFetcher.get_latest_mod_jar(slug, clean_v, loader=loader)
-
-                    if info and info.get("url"):
-                        fname = info["filename"]
-                        dest = os.path.join(target_mods, fname)
-                        if not os.path.exists(dest):
-                            add_log(f"📥 Modrinth'ten indiriliyor: {fname} → {target_label}")
-                            ModrinthFetcher.download_file(info["url"], dest)
-                            add_log(f"✓ Başarıyla kuruldu: {fname}")
-                        if instance_id:
-                            register_installed_mod(
-                                instance_id, slug, fname,
-                                info.get("version_number") or "",
-                            )
-                        self.send_json({
-                            "success": True,
-                            "filename": fname,
-                            "target": target_label,
-                            "message": f"{fname} → {target_label} kuruldu.",
-                        })
+                    if project_type == "mod":
+                        curated_key = (clean_v, loader)
+                        if curated_key in CURATED_OPTIMIZATION_MAP:
+                            for item in CURATED_OPTIMIZATION_MAP[curated_key]:
+                                if item["slug"] == slug:
+                                    info = item
+                                    break
+                        if not info:
+                            info = ModrinthFetcher.get_latest_mod_jar(slug, clean_v, loader=loader)
                     else:
+                        # shader / doku paketi: tam eslesme yoksa en yeni surume dus
+                        info = ModrinthFetcher.get_project_file(
+                            slug, clean_v, project_type=project_type, loader=loader, allow_fallback=True
+                        )
+
+                    if not info or not info.get("url"):
+                        type_label = {
+                            "mod": "modu",
+                            "shader": "shader paketi",
+                            "resourcepack": "doku paketi",
+                        }[project_type]
                         self.send_json({
                             "success": False,
-                            "error": f"'{slug}' modu Minecraft {clean_v} ({loader}) ile uyumlu bir sürüme sahip değil.",
+                            "error": f"'{slug}' {type_label} Minecraft {clean_v} ({loader}) ile uyumlu bir sürüme sahip değil.",
                         })
+                        return
+
+                    exact_match = bool(info.get("exact_match", True))
+
+                    # Tam uyumlu degilse once kullanicidan onay iste
+                    if not exact_match and not force:
+                        matched = (info.get("game_versions") or [""])[0]
+                        self.send_json({
+                            "success": False,
+                            "needs_confirm": True,
+                            "exact_match": False,
+                            "matched_game_version": matched,
+                            "filename": info.get("filename"),
+                            "message": (
+                                f"Bu paket mevcut oyun sürümünüzle (MC {clean_v}) tam eşleşmiyor "
+                                f"(en yakın: {matched or 'bilinmiyor'}). Çoğu zaman sorunsuz çalışır."
+                            ),
+                        })
+                        return
+
+                    fname = info["filename"]
+                    dest = os.path.join(target_dir, fname)
+                    if not os.path.exists(dest):
+                        add_log(f"📥 Modrinth'ten indiriliyor: {fname} → {target_label}")
+                        ModrinthFetcher.download_file(info["url"], dest)
+                        add_log(f"✓ Başarıyla kuruldu: {fname}")
+
+                    if instance_id:
+                        register_installed_content(
+                            instance_id, project_type, slug, fname,
+                            info.get("version_number") or "",
+                        )
+
+                    self.send_json({
+                        "success": True,
+                        "filename": fname,
+                        "target": target_label,
+                        "category": project_type,
+                        "exact_match": exact_match,
+                        "matched_game_version": (info.get("game_versions") or [""])[0] if info.get("game_versions") else "",
+                        "message": f"{fname} → {target_label} kuruldu.",
+                    })
                 except Exception as e:
-                    add_log(f"Mod kurulum hatasi ({slug}): {e}")
-                    self.send_json({"success": False, "error": f"Mod kurulamadı: {e}"})
+                    add_log(f"Icerik kurulum hatasi ({slug}): {e}")
+                    self.send_json({"success": False, "error": f"Kurulamadı: {e}"})
                 return
 
             # 2b. Modpack (.mrpack) -> Yeni Profil Olarak Kur
@@ -1854,6 +2107,19 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         "success": False,
                         "error": "Geçerli bir PNG skin bulunamadı (64x64 / 64x32 / 128x128, max 2MB).",
                     })
+                return
+
+            # 7b. Profil Icerigi Silme (mod / shader / doku paketi)
+            if path in ("/instances/content/delete", "/instances/content/delete/"):
+                inst_id = body.get("instance_id")
+                category = body.get("category") or "mod"
+                name = body.get("name")
+                ok, msg = delete_instance_content(inst_id, category, name)
+                if ok:
+                    add_log(f"🗑️ İçerik silindi ({normalize_category(category)}): {msg}")
+                    self.send_json({"success": True, "deleted": msg})
+                else:
+                    self.send_json({"success": False, "error": msg})
                 return
 
             # 8. Hata Durumunu Temizle (frontend hatayi bir kez gosterdikten sonra cagirir)
