@@ -38,7 +38,7 @@ fn backend_health_ok() -> bool {
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
     // Backend surumu degistiginde bu deger GUNCELLENMELI (backend/server.py API_VERSION ile ayni).
-    response.contains("\"api_version\": 4") || response.contains("\"api_version\":4")
+    response.contains("\"api_version\": 5") || response.contains("\"api_version\":5")
 }
 
 /// Backend'in bulunabilecegi tum kok dizinleri dondurur.
@@ -136,7 +136,7 @@ fn spawn_backend(command: &mut Command) -> std::io::Result<Child> {
 
 fn start_backend_if_needed() {
     if backend_health_ok() {
-        println!("CookieLauncher backend API is already running (api_version 2).");
+        println!("CookieLauncher backend API is already running.");
         return;
     }
 

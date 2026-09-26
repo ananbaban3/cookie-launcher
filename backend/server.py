@@ -70,7 +70,7 @@ os.makedirs(SKINS_DIR, exist_ok=True)
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 4
+API_VERSION = 5
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -998,6 +998,160 @@ def register_installed_content(inst_id, category, slug, filename, version=""):
     save_content_manifest(inst_id, data)
 
 
+_CONTENT_META_CACHE = {}
+_content_meta_lock = threading.Lock()
+
+
+def read_content_metadata(file_path, category):
+    """
+    Jar/zip iceriginden gorunen mod adi, mod id, aciklama ve ikon girdisini cikarir.
+    Fabric (fabric.mod.json), Quilt (quilt.mod.json), Forge/NeoForge (META-INF/mods.toml)
+    ve doku paketleri (pack.mcmeta / pack.png) desteklenir. Sonuc (mtime,size) ile onbelleklenir.
+    """
+    try:
+        st = os.stat(file_path)
+        cache_key = (file_path, int(st.st_mtime), st.st_size)
+    except OSError:
+        return {}
+
+    with _content_meta_lock:
+        cached = _CONTENT_META_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    meta = {
+        "display_name": "",
+        "mod_id": "",
+        "version": "",
+        "description": "",
+        "icon_entry": "",
+        "has_icon": False,
+    }
+
+    try:
+        import zipfile
+        with zipfile.ZipFile(file_path) as zf:
+            names = set(zf.namelist())
+
+            if category == "mod":
+                if "fabric.mod.json" in names:
+                    try:
+                        data = json.loads(zf.read("fabric.mod.json").decode("utf-8", "replace"))
+                    except Exception:
+                        data = {}
+                    if isinstance(data, dict):
+                        meta["mod_id"] = str(data.get("id") or "")
+                        meta["display_name"] = str(data.get("name") or data.get("id") or "")
+                        meta["version"] = str(data.get("version") or "")
+                        desc = data.get("description")
+                        if isinstance(desc, str):
+                            meta["description"] = desc
+                        icon = data.get("icon")
+                        if isinstance(icon, dict) and icon:
+                            try:
+                                icon = icon.values()
+                                icon = sorted(icon, key=lambda v: len(str(v)))[0]
+                            except Exception:
+                                icon = ""
+                        if isinstance(icon, str):
+                            meta["icon_entry"] = icon.lstrip("/")
+                elif "quilt.mod.json" in names:
+                    try:
+                        data = json.loads(zf.read("quilt.mod.json").decode("utf-8", "replace"))
+                    except Exception:
+                        data = {}
+                    loader_meta = (data.get("quilt_loader") or {}) if isinstance(data, dict) else {}
+                    qmeta = loader_meta.get("metadata") or {}
+                    meta["mod_id"] = str(loader_meta.get("id") or "")
+                    meta["display_name"] = str(qmeta.get("name") or loader_meta.get("id") or "")
+                    meta["version"] = str(loader_meta.get("version") or "")
+                    if isinstance(qmeta.get("description"), str):
+                        meta["description"] = qmeta.get("description")
+                    if isinstance(qmeta.get("icon"), str):
+                        meta["icon_entry"] = qmeta.get("icon").lstrip("/")
+
+                if not meta["display_name"] and "META-INF/mods.toml" in names:
+                    text = zf.read("META-INF/mods.toml").decode("utf-8", "replace")
+                    m = re.search(r'displayName\s*=\s*["\']([^"\']+)["\']', text)
+                    if m:
+                        meta["display_name"] = m.group(1)
+                    m = re.search(r'modId\s*=\s*["\']([^"\']+)["\']', text)
+                    if m:
+                        meta["mod_id"] = m.group(1)
+                    m = re.search(r'logoFile\s*=\s*["\']([^"\']+)["\']', text)
+                    if m:
+                        meta["icon_entry"] = m.group(1).lstrip("/")
+                    m = re.search(r'description\s*=\s*["\']([^"\']+)["\']', text)
+                    if m:
+                        meta["description"] = m.group(1)
+                    m = re.search(r'^\s*version\s*=\s*["\']([^"\']+)["\']', text, re.M)
+                    if m:
+                        meta["version"] = m.group(1)
+
+                if not meta["icon_entry"] and meta["mod_id"]:
+                    for cand in (
+                        f"assets/{meta['mod_id']}/icon.png",
+                        f"assets/{meta['mod_id']}/logo.png",
+                        "icon.png",
+                    ):
+                        if cand in names:
+                            meta["icon_entry"] = cand
+                            break
+
+            elif category == "resourcepack":
+                if "pack.png" in names:
+                    meta["icon_entry"] = "pack.png"
+                if "pack.mcmeta" in names:
+                    try:
+                        mcmeta = json.loads(zf.read("pack.mcmeta").decode("utf-8", "replace"))
+                        desc = (mcmeta.get("pack") or {}).get("description")
+                        if isinstance(desc, dict):
+                            desc = desc.get("text") or desc.get("translate") or ""
+                        if desc:
+                            meta["display_name"] = str(desc)[:80]
+                            meta["description"] = str(desc)
+                    except Exception:
+                        pass
+
+            meta["has_icon"] = bool(meta["icon_entry"] and meta["icon_entry"] in names)
+    except Exception:
+        pass
+
+    with _content_meta_lock:
+        _CONTENT_META_CACHE[cache_key] = meta
+    return meta
+
+
+def extract_content_icon(file_path, category, meta):
+    """Icerikten ikon baytlarini ve MIME tipini dondurur."""
+    entry = (meta or {}).get("icon_entry") or ""
+    if not entry and category == "resourcepack":
+        entry = "pack.png"
+    if not entry:
+        return None, None
+
+    try:
+        import zipfile
+        with zipfile.ZipFile(file_path) as zf:
+            if entry not in zf.namelist():
+                return None, None
+            raw = zf.read(entry)
+    except Exception:
+        return None, None
+
+    if not raw:
+        return None, None
+
+    lower = entry.lower()
+    if lower.endswith((".jpg", ".jpeg")):
+        return raw, "image/jpeg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return raw, "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return raw, "image/jpeg"
+    return None, None
+
+
 def get_instance_content(inst_id):
     """Profilin mods / shaderpacks / resourcepacks icerigini listeler."""
     inst_dir = get_instance_dir(inst_id)
@@ -1022,14 +1176,32 @@ def get_instance_content(inst_id):
                         st = os.stat(fp)
                     except OSError:
                         continue
+
                     slug, version = by_filename.get(f.lower(), ("", ""))
-                    files.append({
+
+                    item = {
                         "name": f,
                         "size": st.st_size,
                         "mtime": st.st_mtime,
                         "slug": slug,
                         "version": version,
-                    })
+                        "display_name": "",
+                        "mod_id": "",
+                        "description": "",
+                        "has_icon": False,
+                    }
+
+                    # Mod ve doku paketlerinde gorunen ad / ikon bilgisini dosyadan cikar
+                    if f.lower().endswith((".jar", ".zip")):
+                        meta = read_content_metadata(fp, cat)
+                        item["display_name"] = meta.get("display_name", "")
+                        item["mod_id"] = meta.get("mod_id", "")
+                        item["description"] = meta.get("description", "")
+                        item["has_icon"] = bool(meta.get("has_icon"))
+                        if not version and meta.get("version"):
+                            item["version"] = meta.get("version")
+
+                    files.append(item)
             except Exception:
                 pass
 
@@ -1555,7 +1727,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "app": "CookieLauncher",
                     "version": "2.0.0",
                     "api_version": API_VERSION,
-                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage"],
+                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage", "content_icons"],
                 })
                 return
 
@@ -1703,6 +1875,41 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "instance_id": inst_id,
                     "categories": get_instance_content(inst_id),
                 })
+                return
+
+            # 6d. Icerik Ikonu (jar/zip icinden cikarilir)
+            if path == "/instances/content/icon":
+                inst_id = query.get("instance_id", [""])[0]
+                category = query.get("category", ["mod"])[0]
+                raw_name = query.get("name", [""])[0].strip()
+                safe = os.path.basename(raw_name)
+                inst_dir = get_instance_dir(inst_id)
+                cat = normalize_category(category)
+
+                if not inst_dir or not safe or safe != raw_name:
+                    self.send_json({"success": False, "error": "Geçersiz istek."}, 404)
+                    return
+
+                fp = os.path.join(inst_dir, CATEGORY_DIRS[cat], safe)
+                if not os.path.isfile(fp):
+                    self.send_json({"success": False, "error": "Dosya bulunamadı."}, 404)
+                    return
+
+                icon_meta = read_content_metadata(fp, cat)
+                raw, mime = extract_content_icon(fp, cat, icon_meta)
+                if not raw:
+                    self.send_json({"success": False, "error": "İkon bulunamadı."}, 404)
+                    return
+
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime or "image/png")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(raw)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 return
 
             # 7. Offline Skin Bilgisi

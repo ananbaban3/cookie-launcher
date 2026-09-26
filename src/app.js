@@ -161,7 +161,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 4) {
+        if (data && Number(data.api_version) >= 5) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -1449,17 +1449,36 @@ function renderInstalledPanel() {
       ? `${(f.size / 1048576).toFixed(1)} MB`
       : `${Math.max(1, Math.round((f.size || 0) / 1024))} KB`;
 
+    const displayName = (f.display_name && String(f.display_name).trim()) || cleanContentName(f.name);
+
     const metaParts = [];
-    if (f.slug) metaParts.push(f.slug);
+    if (f.mod_id) metaParts.push(f.mod_id);
     if (f.version) metaParts.push(`v${f.version}`);
     metaParts.push(sizeText);
 
-    row.innerHTML = `
-      <span class="installed-row-icon">${icons[cat]}</span>
-      <div class="installed-row-info">
-        <div class="installed-row-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
-        <div class="installed-row-meta">${escapeHtml(metaParts.join(" • "))}</div>
-      </div>
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "installed-row-icon";
+    iconSpan.textContent = icons[cat] || "📦";
+    if (f.has_icon) {
+      const img = document.createElement("img");
+      img.className = "installed-row-icon-img";
+      img.alt = "";
+      img.loading = "lazy";
+      img.src = `${API_BASE}/api/instances/content/icon?instance_id=${encodeURIComponent(target.id)}` +
+        `&category=${encodeURIComponent(cat)}&name=${encodeURIComponent(f.name)}&t=${Math.round(f.mtime || 0)}`;
+      img.addEventListener("error", () => {
+        img.remove();
+        iconSpan.textContent = icons[cat] || "📦";
+      });
+      iconSpan.textContent = "";
+      iconSpan.appendChild(img);
+    }
+
+    const info = document.createElement("div");
+    info.className = "installed-row-info";
+    info.innerHTML = `
+      <div class="installed-row-name" title="${escapeHtml(f.description || f.name)}">${escapeHtml(displayName)}</div>
+      <div class="installed-row-meta">${escapeHtml(metaParts.join(" • "))}</div>
     `;
 
     const delBtn = document.createElement("button");
@@ -1467,10 +1486,18 @@ function renderInstalledPanel() {
     delBtn.title = "Bu içeriği profilden kaldır";
     delBtn.textContent = "🗑️";
     delBtn.addEventListener("click", () => deleteInstalledContent(cat, f.name));
-    row.appendChild(delBtn);
 
+    row.appendChild(iconSpan);
+    row.appendChild(info);
+    row.appendChild(delBtn);
     wrap.appendChild(row);
   });
+}
+
+function cleanContentName(name) {
+  let n = String(name || "").replace(/\.(jar|zip)$/i, "");
+  n = n.replace(/[-_+ ]v?\d[\w.+\-]*$/i, "").trim();
+  return n || String(name || "");
 }
 
 async function deleteInstalledContent(category, name) {

@@ -2222,3 +2222,22 @@ body::before {
   filter: brightness(1.1);
   box-shadow: 0 4px 16px rgba(243, 139, 168, 0.35);
 }
+
+/* Yüklü içerik satırı: mod ikonu */
+.installed-row-icon {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.installed-row-icon-img {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  object-fit: cover;
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.25);
+}
