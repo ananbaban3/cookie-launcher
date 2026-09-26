@@ -49,6 +49,7 @@ const state = {
   installedContentMeta: { mod: {}, shader: {}, resourcepack: {} },
   installedCategory: "mod",
   installedPanelCollapsed: false,
+  contentLoadFailed: false,
   coreModsWarned: false,
 
   // 3D Skin Viewer
@@ -160,7 +161,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 3) {
+        if (data && Number(data.api_version) >= 4) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -1338,16 +1339,22 @@ async function refreshInstalledContent() {
 
   const target = getModrinthTarget();
   renderInstalledPanel();
-  if (!target) return;
+  if (!target) {
+    state.contentLoadFailed = false;
+    return;
+  }
 
   const data = await apiGet(`/api/instances/content?instance_id=${encodeURIComponent(target.id)}`, 8000);
   if (!data || data.success !== true) {
+    state.contentLoadFailed = true;
+    renderInstalledPanel();
     if (!state.coreModsWarned) {
       state.coreModsWarned = true;
       showToast("Core güncel değil: yüklü içerik listesi için launcher'ı yeniden başlatın.", "info");
     }
     return;
   }
+  state.contentLoadFailed = false;
 
   const categories = data.categories || {};
   ["mod", "shader", "resourcepack"].forEach(cat => {
@@ -1420,6 +1427,10 @@ function renderInstalledPanel() {
 
   if (!target) {
     wrap.innerHTML = `<div class="installed-empty">Yönetmek için üstten bir kurulum hedefi (profil) seçin.</div>`;
+    return;
+  }
+  if (state.contentLoadFailed) {
+    wrap.innerHTML = `<div class="installed-empty">⚠️ İçerik listesi alınamadı. Core eski sürümde olabilir; launcher'ı kapatıp yeniden başlatın.</div>`;
     return;
   }
   if (files.length === 0) {

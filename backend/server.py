@@ -68,7 +68,9 @@ VERSIONS_CACHE_FILE = os.path.join(APP_DATA_DIR, "versions_manifest_cache.json")
 SKINS_DIR = os.path.join(APP_DATA_DIR, "skins")
 os.makedirs(SKINS_DIR, exist_ok=True)
 
-API_VERSION = 3
+# NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
+# src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
+API_VERSION = 4
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -1553,7 +1555,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "app": "CookieLauncher",
                     "version": "2.0.0",
                     "api_version": API_VERSION,
-                    "features": ["instances", "modpack", "skins", "instance_mods"],
+                    "features": ["instances", "modpack", "skins", "instance_mods", "content_manage"],
                 })
                 return
 
