@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="tr" class="scroll-smooth dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cookie Launcher | Sade, Hafif & Hızlı Minecraft Başlatıcısı</title>
+  <meta name="description" content="Cookie Launcher - Tauri (Rust) kabuk ve hafif Python çekirdekle çalışan, Modrinth destekli, izole profilli, açık kaynak (GPL-3.0) Minecraft başlatıcısı.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            cookie: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              200: '#fde68a',
+              300: '#fcd34d',
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706',
+              700: '#b45309',
+              800: '#92400e',
+              900: '#78350f',
+            },
+            surface: {
+              base: '#08090d',
+              card: '#10121a',
+              cardHover: '#161924',
+              border: '#1e2333',
+              borderLight: '#2c3349'
+            }
+          },
+          animation: {
+            'glow': 'glow 5s ease-in-out infinite alternate',
+          },
+          keyframes: {
+            glow: {
+              '0%': { opacity: 0.35, transform: 'scale(0.98)' },
+              '100%': { opacity: 0.65, transform: 'scale(1.02)' }
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #08090d;
+      color: #e2e8f0;
+      overflow-x: hidden;
+    }
+    .grid-bg {
+      background-image: radial-gradient(rgba(245, 158, 11, 0.07) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    .cookie-text-gradient {
+      background: linear-gradient(135deg, #fde68a 0%, #f59e0b 55%, #ea580c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    ::-webkit-scrollbar {
+      width: 7px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #08090d;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e2333;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #f59e0b;
+    }
+  </style>
+</head>
+<body class="antialiased min-h-screen relative selection:bg-cookie-500/30 selection:text-cookie-300">
+
+  <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+    <div class="absolute -top-32 left-1/2 -translate-x-1/2 w-[750px] h-[450px] bg-gradient-to-b from-cookie-500/20 via-amber-600/10 to-transparent blur-[130px] rounded-full animate-glow"></div>
+    <div class="absolute top-[45%] -left-40 w-96 h-96 bg-amber-600/10 blur-[150px] rounded-full"></div>
+    <div class="absolute top-[70%] -right-40 w-96 h-96 bg-orange-600/10 blur-[150px] rounded-full"></div>
+    <div class="absolute inset-0 grid-bg opacity-70"></div>
+  </div>
+
+  <header class="sticky top-0 z-50 backdrop-blur-md bg-surface-base/85 border-b border-surface-border">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      
+      <!-- Brand Logo -->
+      <a href="#" class="flex items-center gap-3 group">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-cookie-400 to-cookie-600 p-[2px] shadow-lg shadow-cookie-500/25 group-hover:scale-105 transition-transform duration-300">
+          <div class="w-full h-full bg-surface-card rounded-[14px] flex items-center justify-center text-xl">
+            🍪
+          </div>
+        </div>
+        <div class="flex flex-col">
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-xl tracking-tight text-white group-hover:text-cookie-400 transition-colors">Cookie Launcher</span>
+            <span class="px-2 py-0.5 text-[10px] font-mono font-semibold bg-cookie-500/15 text-cookie-400 border border-cookie-500/30 rounded-full">v2.0.0</span>
+          </div>
+          <span class="text-xs text-slate-400 font-medium">Hafif, Bağımsız & Açık Kaynak</span>
+        </div>
+      </a>
+
+      <!-- Desktop Nav -->
+      <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
+        <a href="#preview" class="hover:text-cookie-400 transition-colors">Arayüz</a>
+        <a href="#features" class="hover:text-cookie-400 transition-colors">Özellikler</a>
+        <a href="#downloads" class="hover:text-cookie-400 transition-colors">İndirme Merkezi</a>
+        <a href="#faq" class="hover:text-cookie-400 transition-colors">SSS</a>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <a href="https://github.com/ananbaban3/cookie-launcher" target="_blank" rel="noopener noreferrer" 
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-surface-card border border-surface-border hover:border-cookie-500/50 hover:bg-surface-cardHover text-slate-200 transition-all">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          <span class="hidden sm:inline">GitHub</span>
+        </a>
+
+        <a href="#downloads" 
+           class="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 shadow-md shadow-cookie-500/25 transition-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          <span>İndir</span>
+        </a>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="relative z-10">
+    <section class="pt-16 pb-16 md:pt-24 md:pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center">
+      
+      <!-- Status pill -->
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-surface-card border border-cookie-500/30 text-cookie-300 text-xs font-medium mb-6">
+        <span class="w-2 h-2 rounded-full bg-cookie-400 animate-pulse"></span>
+        <span>Yeni Nesil Masaüstü Başlatıcısı</span>
+        <span class="text-slate-600">•</span>
+        <span class="text-slate-400">Gereksiz Hantallıklardan Arındırıldı</span>
+      </div>
+
+      <!-- Hero Heading -->
+      <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.12]">
+        Hızlı, Sade ve <br class="hidden sm:block">
+        <span class="cookie-text-gradient">Bilgisayarınızı Yormayan</span> Başlatıcı.
+      </h1>
+
+      <p class="mt-6 text-base sm:text-lg text-slate-400 max-w-3xl mx-auto font-normal leading-relaxed">
+        Electron/Chromium yığını yerine <span class="text-cookie-400 font-semibold">Tauri (Rust)</span> kabuğu ve hafif bir <span class="text-cookie-400 font-semibold">Python çekirdeği</span> kullanan; profiller, mod/modpack yönetimi ve Modrinth entegrasyonuyla öne çıkan modern Minecraft başlatıcısı.
+      </p>
+
+      <div class="mt-9 flex flex-col sm:flex-row items-center justify-center gap-4">
+        
+        <!-- Detected OS Quick Download -->
+        <a href="#downloads" id="hero-cta-btn"
+           class="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-3.5 rounded-xl bg-gradient-to-r from-cookie-500 to-amber-500 hover:from-cookie-400 hover:to-amber-400 text-slate-950 font-bold text-base shadow-xl shadow-cookie-500/25 transition-all">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          <span id="hero-cta-label">Windows İçin İndir (.exe)</span>
+        </a>
+
+        <!-- Source Code Link -->
+        <a href="https://github.com/ananbaban3/cookie-launcher" target="_blank" rel="noopener noreferrer"
+           class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-surface-card hover:bg-surface-cardHover border border-surface-border text-slate-300 hover:text-white font-semibold text-base transition-all">
+          <svg class="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          <span>Kaynak Kodları</span>
+          <span class="text-xs bg-surface-border text-slate-400 px-2 py-0.5 rounded font-mono">GPL-3.0</span>
+        </a>
+
+      </div>
+
+      <!-- Quick Metrics -->
+      <div class="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto pt-8 border-t border-surface-border/60">
+        <div>
+          <div class="text-2xl font-extrabold text-white font-mono">Tauri + Rust</div>
+          <div class="text-xs text-slate-400 mt-1">Hafif Masaüstü Kabuğu</div>
+        </div>
+        <div>
+          <div class="text-2xl font-extrabold text-cookie-400 font-mono">Anında</div>
+          <div class="text-xs text-slate-400 mt-1">Non-blocking Başlatma</div>
+        </div>
+        <div>
+          <div class="text-2xl font-extrabold text-white font-mono">%100</div>
+          <div class="text-xs text-slate-400 mt-1">Açık Kaynak (GPL-3.0)</div>
+        </div>
+        <div>
+          <div class="text-2xl font-extrabold text-cookie-400 font-mono">Sıfır</div>
+          <div class="text-xs text-slate-400 mt-1">Reklam / Telemetri</div>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="preview" class="py-12 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+      
+      <div class="text-center mb-10">
+        <span class="text-cookie-400 text-xs font-mono font-bold tracking-widest uppercase">Masaüstü Arayüzü</span>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-white mt-2">Kullanıcı Dostu ve Sade Tasarım</h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-2">Karmaşık menüler yerine oyununuza odaklanan minimalist bir deneyim.</p>
+      </div>
+
+      <!-- Realistic Desktop Window Frame -->
+      <div class="rounded-2xl bg-surface-card border border-surface-border shadow-2xl overflow-hidden">
+        
+        <!-- Window Title Bar -->
+        <div class="bg-surface-base px-4 py-3 border-b border-surface-border flex items-center justify-between select-none">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-md bg-surface-border/80 text-slate-400 text-[11px] inline-flex items-center justify-center font-mono">−</span>
+            <span class="w-5 h-5 rounded-md bg-surface-border/80 text-slate-400 text-[11px] inline-flex items-center justify-center font-mono">□</span>
+            <span class="w-5 h-5 rounded-md bg-surface-border/80 text-rose-400 text-[11px] inline-flex items-center justify-center font-mono">✕</span>
+            <span class="ml-3 text-xs font-mono text-slate-400 flex items-center gap-1.5">
+              <span>🍪</span> Cookie Launcher — v2.0.0
+            </span>
+          </div>
+
+          <div class="flex items-center gap-3 text-xs text-slate-400 font-mono">
+            <span class="flex items-center gap-1.5 text-emerald-400">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Modrinth Bağlı
+            </span>
+            <span class="hidden sm:inline bg-surface-border px-2 py-0.5 rounded text-[11px] text-slate-400">Java: Otomatik</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-12 min-h-[460px]">
+          
+          <!-- App Sidebar -->
+          <div class="md:col-span-3 bg-surface-base/80 p-4 border-r border-surface-border flex flex-col justify-between">
+            <div class="space-y-1">
+              
+              <!-- Profile Card -->
+              <div class="flex items-center gap-3 p-2 rounded-xl bg-surface-card border border-surface-border mb-4">
+                <div class="w-9 h-9 rounded-lg bg-cookie-500/20 border border-cookie-500/40 flex items-center justify-center font-bold text-cookie-400">
+                  C
+                </div>
+                <div class="overflow-hidden">
+                  <div class="text-sm font-bold text-white truncate">CookiePlayer</div>
+                  <div class="text-[11px] text-emerald-400 flex items-center gap-1 font-mono">
+                    <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span> Çevrimdışı Hesap
+                  </div>
+                </div>
+              </div>
+
+              <!-- Nav items -->
+              <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold bg-cookie-500/10 text-cookie-400 border border-cookie-500/30">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                <span>Oyna</span>
+              </div>
+
+              <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                <span>Modlar &amp; Paketler</span>
+              </div>
+
+              <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span>Profiller</span>
+              </div>
+
+              <div class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span>Konsol</span>
+              </div>
+            </div>
+
+            <!-- Launcher Memory Status Footnote -->
+            <div class="mt-6 p-3 rounded-xl bg-surface-card border border-surface-border">
+              <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono mb-1">
+                <span>Aktif Profil:</span>
+                <span class="text-cookie-400 font-semibold truncate ml-2">Survival Optimize</span>
+              </div>
+              <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                <span>İzole Mod Klasörü</span>
+                <span class="text-emerald-400">✓ Profile özel</span>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="md:col-span-9 p-6 sm:p-7 flex flex-col justify-between bg-gradient-to-b from-surface-card to-surface-base">
+            
+            <div>
+              <!-- Instance Hero Box -->
+              <div class="rounded-2xl border border-surface-border p-5 bg-gradient-to-r from-amber-950/20 via-surface-card to-slate-900/30">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <div class="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-md text-xs font-mono bg-cookie-500/15 text-cookie-300 border border-cookie-500/30 mb-2">
+                      <span>⚡ FABRIC 1.21.4</span>
+                      <span>•</span>
+                      <span>Optimizasyon Paketi</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-white">Survival Optimize 1.21</h3>
+                    <p class="text-xs text-slate-400 mt-1">Sodium + Fabric API otomatik kuruldu; tüm modlar bu profile izole.</p>
+                  </div>
+                  
+                  <div class="text-left sm:text-right font-mono text-xs text-slate-400">
+                    <div>Son Oynanma: Dün</div>
+                    <div class="text-slate-500 text-[11px]">12 Mod • 2 Shader</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mod and Configuration Overview -->
+              <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="p-3.5 rounded-xl bg-surface-base/80 border border-surface-border">
+                  <div class="text-xs font-semibold text-slate-300 mb-1">Ayrılan Bellek (RAM)</div>
+                  <div class="text-sm font-mono text-cookie-400 font-bold">4096 MB (4 GB)</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5 font-mono">Aikar G1GC Optimizasyonu</div>
+                </div>
+
+                <div class="p-3.5 rounded-xl bg-surface-base/80 border border-surface-border">
+                  <div class="text-xs font-semibold text-slate-300 mb-1">Java Çalışma Zamanı</div>
+                  <div class="text-sm font-mono text-emerald-400 font-bold">Sürüme Uygun Java</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5 font-mono">Otomatik İndirildi & Yapılandırıldı</div>
+                </div>
+              </div>
+
+              <!-- Installed mods chips -->
+              <div class="mt-4 p-3.5 rounded-xl bg-surface-base/60 border border-surface-border">
+                <div class="text-xs font-semibold text-slate-400 mb-2 font-mono uppercase tracking-wider">Yüklü İçerikler (6 Aktif)</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-cookie-500/30 text-cookie-300">Sodium</span>
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-cookie-500/30 text-cookie-300">Fabric API</span>
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-cookie-500/30 text-cookie-300">Iris Shaders</span>
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-cookie-500/30 text-cookie-300">EntityCulling</span>
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-slate-700 text-slate-400">Cloth Config</span>
+                  <span class="px-2.5 py-1 rounded-md text-xs font-mono bg-surface-card border border-slate-700 text-slate-400">Modrinth</span>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Bottom instance launch mock bar -->
+            <div class="mt-6 pt-4 border-t border-surface-border flex items-center justify-between">
+              <div class="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <span>Tüm dosyalar doğrulandı</span>
+              </div>
+
+              <div class="px-6 py-2.5 rounded-xl font-bold text-slate-950 bg-gradient-to-r from-cookie-400 to-amber-500 flex items-center gap-2 cursor-default select-none shadow-md shadow-cookie-500/20">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <span>Minecraft'ı Başlat</span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+    <section id="features" class="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      
+      <div class="text-center max-w-3xl mx-auto mb-14">
+        <span class="text-cookie-400 text-xs font-mono font-bold tracking-widest uppercase">Avantajlar</span>
+        <h2 class="text-3xl sm:text-4xl font-extrabold text-white mt-2">Neden Cookie Launcher?</h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-2">
+          Electron/Chromium paketi yok; Tauri işletim sisteminin kendi webview'ini kullanır. Reklam ve telemetri bulunmaz.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        
+        <!-- Card 1 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-amber-500/15 text-cookie-400 flex items-center justify-center text-xl mb-4">
+            ⚡
+          </div>
+          <h3 class="text-lg font-bold text-white">Hafif Tauri Mimarisi</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Electron/Chromium paketi yok; arayüz işletim sisteminin kendi webview'ini kullanan Tauri (Rust) kabuğunda çalışır. İndirme ve başlatma işleri hafif bir Python çekirdeğine aittir.
+          </p>
+        </div>
+
+        <!-- Card 2 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-purple-500/15 text-purple-400 flex items-center justify-center text-xl mb-4">
+            📦
+          </div>
+          <h3 class="text-lg font-bold text-white">Modrinth & Mod Paketleri</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Arayüzden mod, shader ve doku paketi arayın; tek tıkla aktif profile kurun. Modpack'ler (.mrpack) ikonlu, yeni bir oyun profili olarak otomatik kurulur.
+          </p>
+        </div>
+
+        <!-- Card 3 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-blue-500/15 text-blue-400 flex items-center justify-center text-xl mb-4">
+            🔑
+          </div>
+          <h3 class="text-lg font-bold text-white">İzole Oyun Profilleri</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Her profil kendi Minecraft sürümüne, yükleyicisine ve ayrı mod/shader/doku klasörüne sahiptir. Aktif profili seçin; oyun ona göre başlasın.
+          </p>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center text-xl mb-4">
+            ☕
+          </div>
+          <h3 class="text-lg font-bold text-white">Otomatik Java &amp; Aikar GC</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Sürümün istediği Java çalışma zamanını (8/17/21) Mojang'dan otomatik indirir; Aikar G1GC bayraklarıyla mikro takılmaları azaltır.
+          </p>
+        </div>
+
+        <!-- Card 5 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center text-xl mb-4">
+            🐧
+          </div>
+          <h3 class="text-lg font-bold text-white">Windows &amp; Linux Desteği</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Windows kurulumu gömülü çekirdekle gelir (Python gerekmez); Linux'ta AppImage, .deb ve .rpm paketleri hazırdır. Çerçevesiz pencere ve native sürükleme desteği vardır.
+          </p>
+        </div>
+
+        <!-- Card 6 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-400 flex items-center justify-center text-xl mb-4">
+            🛡️
+          </div>
+          <h3 class="text-lg font-bold text-white">Sıfır Telemetri, Açık Kaynak</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Kullanıcı verisi toplamıyoruz, arkada analiz istekleri göndermiyoruz. GPL-3.0 lisanslı kaynak kodlarımızı GitHub üzerinden herkes denetleyebilir.
+          </p>
+        </div>
+
+        <!-- Card 7 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-fuchsia-500/15 text-fuchsia-400 flex items-center justify-center text-xl mb-4">
+            🎮
+          </div>
+          <h3 class="text-lg font-bold text-white">Canlı İlerleme Akışı</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            İndirme ve kurulum boyunca yüzde, indirilen MB ve anlık durum mesajı gösterilir. Başlatma isteği anında yanıtlanır, arayüz asla kilitlenmez.
+          </p>
+        </div>
+
+        <!-- Card 8 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center text-xl mb-4">
+            🧩
+          </div>
+          <h3 class="text-lg font-bold text-white">İçerik Yönetim Merkezi</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Yüklü modları gerçek adları ve ikonlarıyla görün, kategorilere göre filtreleyin, tek tıkla silin. "İndirilenleri gizle" ile kalabalığı önleyin.
+          </p>
+        </div>
+
+        <!-- Card 9 -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border hover:border-cookie-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-orange-500/15 text-orange-400 flex items-center justify-center text-xl mb-4">
+            ✨
+          </div>
+          <h3 class="text-lg font-bold text-white">Esnek Shader &amp; Doku Desteği</h3>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">
+            Shader ve doku paketlerinde tam sürüm eşleşmesi şart değildir; en yakın sürüm önerilir ve onayınızla kurulur. Modlarda kararlılık için sıkı eşleşme korunur.
+          </p>
+        </div>
+
+      </div>
+
+    </section>
+
+    <section id="downloads" class="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      
+      <div class="text-center max-w-3xl mx-auto mb-12">
+        <span class="text-cookie-400 text-xs font-mono font-bold tracking-widest uppercase">İndirme Merkezi</span>
+        <h2 class="text-3xl sm:text-5xl font-extrabold text-white mt-2">Cookie Launcher'ı Edinin</h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-3">Platformunuzu seçin ve doğrudan GitHub üzerinden son kararlı sürümü indirin.</p>
+        
+        <!-- Platform Switch Tabs -->
+        <div class="inline-flex p-1.5 rounded-2xl bg-surface-card border border-surface-border mt-8 gap-1">
+          <button onclick="selectPlatform('windows')" id="tab-windows-btn" class="px-5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-cookie-500 text-slate-950 transition-all">
+            🪟 Windows
+          </button>
+          <button onclick="selectPlatform('linux')" id="tab-linux-btn" class="px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition-all">
+            🐧 Linux
+          </button>
+          <button onclick="selectPlatform('macos')" id="tab-macos-btn" class="px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1.5">
+            <span>🍎 macOS</span>
+            <span class="text-[10px] bg-amber-500/20 text-cookie-400 px-1.5 py-0.2 rounded">WIP</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="content-windows" class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+        <!-- Windows Setup -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Kurulumlu</span>
+              <span class="text-xs font-mono text-slate-400">Windows 10 / 11 (64-bit)</span>
+            </div>
+            <h3 class="text-lg font-bold text-white mt-2">Windows Yükleyici (.exe)</h3>
+            <p class="text-xs text-slate-400 mt-1">Başlat menüsüne ve masaüstüne kısayol oluşturur. Gömülü çekirdek sayesinde Python kurmaya gerek yoktur.</p>
+          </div>
+          <a href="https://github.com/ananbaban3/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
+             class="mt-6 w-full py-3 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 flex items-center justify-center gap-2 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+            <span>Yükleyiciyi İndir (.exe)</span>
+          </a>
+        </div>
+
+        <!-- Kaynaktan Derleme -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30">Geliştirici</span>
+              <span class="text-xs font-mono text-slate-400">Node + Rust + Python</span>
+            </div>
+            <h3 class="text-lg font-bold text-white mt-2">Kaynaktan Derle</h3>
+            <p class="text-xs text-slate-400 mt-1">Depoyu klonlayıp <span class="font-mono">npm run tauri:build</span> ile kendi paketini üret. Katkılar memnuniyetle karşılanır.</p>
+          </div>
+          <a href="https://github.com/ananbaban3/cookie-launcher" target="_blank" rel="noopener noreferrer"
+             class="mt-6 w-full py-3 rounded-xl font-bold bg-surface-border hover:bg-slate-700 text-white flex items-center justify-center gap-2 transition-all">
+            <span>GitHub Deposunu Aç</span>
+          </a>
+        </div>
+      </div>
+
+      <div id="content-linux" class="hidden grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <!-- AppImage -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border flex flex-col justify-between">
+          <div>
+            <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Evrensel</span>
+            <h3 class="text-lg font-bold text-white mt-3">Universal AppImage</h3>
+            <p class="text-xs text-slate-400 mt-1">Ubuntu, Fedora, Debian ve diğer dağıtımlarda bağımlılık sorunu olmadan çalışır.</p>
+          </div>
+          <a href="https://github.com/ananbaban3/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
+             class="mt-6 w-full py-2.5 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center text-sm transition-all">
+            İndir (.AppImage)
+          </a>
+        </div>
+
+        <!-- Debian / Ubuntu -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border flex flex-col justify-between">
+          <div>
+            <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">Debian / Ubuntu</span>
+            <h3 class="text-lg font-bold text-white mt-3">.deb Paketi</h3>
+            <p class="text-xs text-slate-400 mt-1">Debian tabanlı dağıtımlarda çift tıkla kurulur; gömülü çekirdek içerir.</p>
+          </div>
+          <a href="https://github.com/ananbaban3/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
+             class="mt-6 w-full py-2.5 rounded-xl font-bold bg-surface-border hover:bg-slate-700 text-white text-center text-sm transition-all">
+            İndir (.deb)
+          </a>
+        </div>
+
+        <!-- Fedora / RHEL -->
+        <div class="p-6 rounded-2xl bg-surface-card border border-surface-border flex flex-col justify-between">
+          <div>
+            <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-slate-500/15 text-slate-300 border border-slate-500/30">Fedora / RHEL</span>
+            <h3 class="text-lg font-bold text-white mt-3">.rpm Paketi</h3>
+            <p class="text-xs text-slate-400 mt-1">Fedora, RHEL ve türevlerinde paket yöneticisiyle kurulur.</p>
+          </div>
+          <a href="https://github.com/ananbaban3/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
+             class="mt-6 w-full py-2.5 rounded-xl font-bold bg-surface-border hover:bg-slate-700 text-white text-center text-sm transition-all">
+            İndir (.rpm)
+          </a>
+        </div>
+      </div>
+
+      <div id="content-macos" class="hidden max-w-3xl mx-auto">
+        <div class="p-8 rounded-2xl bg-surface-card border border-amber-500/30 relative overflow-hidden">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-amber-500/20 text-cookie-400 flex items-center justify-center text-2xl flex-shrink-0">
+              🍎
+            </div>
+            <div>
+              <div class="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-md text-xs font-mono font-semibold bg-amber-500/20 text-cookie-400 border border-amber-500/30 mb-2">
+                Geliştirme Aşamasında (WIP)
+              </div>
+              <h3 class="text-xl font-bold text-white">macOS Sürümleri Henüz Hazır Değil</h3>
+              <p class="text-slate-300 text-sm mt-3 leading-relaxed">
+                Geliştiricinin elinde fiziksel bir Mac donanımı (MacBook / Mac mini vb.) bulunmadığından dolayı, macOS derlemeleri yerel ortamda test edilememektedir.
+              </p>
+              
+              <div class="mt-4 p-4 rounded-xl bg-surface-base border border-surface-border text-xs text-slate-400 space-y-2 font-mono">
+                <div class="flex items-center gap-2 text-cookie-400 font-semibold">
+                  <span>⚙️ Gelecek Planı (CI/CD Otomasyonu):</span>
+                </div>
+                <div>İlerleyen süreçte <strong>GitHub Actions</strong> sanal macOS sunucuları (CI runners) kurularak hem Apple Silicon (M1/M2/M3/M4) hem de Intel mimarileri için DMG paketleri otomatik derlenecektir.</div>
+              </div>
+
+              <div class="mt-6 flex flex-wrap items-center gap-3">
+                <a href="https://github.com/ananbaban3/cookie-launcher" target="_blank" rel="noopener noreferrer"
+                   class="px-5 py-2.5 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-sm inline-flex items-center gap-2 transition-all">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                  <span>GitHub'da Takip Et & Yıldız Ver</span>
+                </a>
+                <span class="text-xs text-slate-500 font-mono">macOS derlemesi çıktığında bildirim almak için depoyu izleyebilirsiniz.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="faq" class="py-16 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+      
+      <div class="text-center mb-10">
+        <span class="text-cookie-400 text-xs font-mono font-bold tracking-widest uppercase">Merak Edilenler</span>
+        <h2 class="text-3xl font-extrabold text-white mt-2">Sıkça Sorulan Sorular</h2>
+      </div>
+
+      <div class="space-y-3">
+        
+        <div class="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
+          <button onclick="toggleFaq(this)" class="w-full p-4 text-left flex items-center justify-between text-white font-semibold text-sm hover:text-cookie-400 transition-colors">
+            <span>Hesap sistemi nasıl çalışıyor?</span>
+            <span class="text-cookie-400 font-mono text-lg icon">+</span>
+          </button>
+          <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
+            Şu an çevrimdışı (offline) kullanıcı adı desteği vardır; oyun seçtiğiniz profille başlatılır. Microsoft/Xbox hesap girişi yol haritasındadır. Hiçbir giriş bilgisi toplanmaz, çünkü toplanacak veri yoktur.
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
+          <button onclick="toggleFaq(this)" class="w-full p-4 text-left flex items-center justify-between text-white font-semibold text-sm hover:text-cookie-400 transition-colors">
+            <span>macOS için DMG indirmesi ne zaman gelir?</span>
+            <span class="text-cookie-400 font-mono text-lg icon">+</span>
+          </button>
+          <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
+            Geliştiricinin elinde Mac bilgisayar bulunmadığı için doğrudan derleme yapılamamaktadır. Ancak GitHub Actions CI/CD ortamında otomatik derleme akışı yapılandırıldığında macOS kullanıcıları için hem Intel hem de Apple Silicon DMG paketleri yayınlanacaktır.
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
+          <button onclick="toggleFaq(this)" class="w-full p-4 text-left flex items-center justify-between text-white font-semibold text-sm hover:text-cookie-400 transition-colors">
+            <span>Hangi mod yükleyicilerini destekliyor?</span>
+            <span class="text-cookie-400 font-mono text-lg icon">+</span>
+          </button>
+          <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
+            Vanilla, Fabric ve Forge profilleri oluşturabilirsiniz. Modrinth modpack'leri (.mrpack) ise kendi Fabric/Forge/NeoForge/Quilt sürümleriyle otomatik olarak yeni bir profil halinde kurulur. Mod kaynağı Modrinth'tir; CurseForge entegrasyonu yoktur.
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
+          <button onclick="toggleFaq(this)" class="w-full p-4 text-left flex items-center justify-between text-white font-semibold text-sm hover:text-cookie-400 transition-colors">
+            <span>Windows'ta Python kurmam gerekiyor mu?</span>
+            <span class="text-cookie-400 font-mono text-lg icon">+</span>
+          </button>
+          <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
+            Hayır. Setup paketi, PyInstaller ile derlenmiş gömülü çekirdeği (cookielauncher-core.exe) içerir. Linux paketlerinde de aynı gömülü çekirdek bulunur; ek bir kurulum gerekmez.
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
+          <button onclick="toggleFaq(this)" class="w-full p-4 text-left flex items-center justify-between text-white font-semibold text-sm hover:text-cookie-400 transition-colors">
+            <span>Shader'ım farklı bir sürüm için; yine de kurulur mu?</span>
+            <span class="text-cookie-400 font-mono text-lg icon">+</span>
+          </button>
+          <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
+            Evet. Shader ve doku paketlerinde tam sürüm eşleşmesi aranmaz; en yakın sürüm size önerilir ve onayınızla kurulur. Modlarda ise oyunun çökmemesi için sürüm ve yükleyici eşleşmesi zorunludur.
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="border-t border-surface-border bg-surface-base text-slate-400 text-xs sm:text-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span class="text-base">🍪</span>
+        <span class="font-bold text-white">Cookie Launcher</span>
+        <span class="text-slate-600">|</span>
+        <span class="text-slate-400">GPL-3.0 Lisansı ile Açık Kaynak</span>
+      </div>
+
+      <div class="flex items-center gap-6">
+        <a href="https://github.com/ananbaban3/cookie-launcher" target="_blank" class="hover:text-cookie-400 transition-colors">GitHub</a>
+        <a href="https://github.com/ananbaban3/cookie-launcher/issues" target="_blank" class="hover:text-cookie-400 transition-colors">Sorun Bildir (Issues)</a>
+        <a href="https://github.com/ananbaban3/cookie-launcher/releases" target="_blank" class="hover:text-cookie-400 transition-colors">Sürümler</a>
+        <a href="https://github.com/ananbaban3/cookie-launcher/blob/main/LICENSE" target="_blank" class="hover:text-cookie-400 transition-colors">Lisans</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-box" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <script>
+    // Copy to clipboard helper
+    function copyToClipboard(text, successMsg = 'Panoya kopyalandı!') {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text, successMsg));
+      } else {
+        fallbackCopy(text, successMsg);
+      }
+    }
+
+    function fallbackCopy(text, successMsg) {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      try {
+        document.execCommand('copy');
+        showToast(successMsg);
+      } catch (err) {
+        console.error('Kopyalama hatası:', err);
+      }
+      document.body.removeChild(el);
+    }
+
+    // Modern Toast Notification
+    function showToast(message) {
+      const box = document.getElementById('toast-box');
+      const toast = document.createElement('div');
+      toast.className = 'pointer-events-auto px-4 py-3 rounded-xl bg-surface-card border border-cookie-500/40 text-white text-xs font-semibold shadow-xl flex items-center gap-2 transform translate-y-2 opacity-0 transition-all duration-200';
+      toast.innerHTML = `<span>🍪</span> <span>${message}</span>`;
+      box.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-1');
+        setTimeout(() => toast.remove(), 250);
+      }, 3000);
+    }
+
+    // Platform switcher tabs
+    function selectPlatform(os) {
+      const platforms = ['windows', 'linux', 'macos'];
+      platforms.forEach(p => {
+        const content = document.getElementById(`content-${p}`);
+        const btn = document.getElementById(`tab-${p}-btn`);
+        if (p === os) {
+          content.classList.remove('hidden');
+          if (p !== 'macos') content.classList.add('grid');
+          btn.className = 'px-5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-cookie-500 text-slate-950 transition-all flex items-center gap-1.5';
+        } else {
+          content.classList.add('hidden');
+          content.classList.remove('grid');
+          btn.className = 'px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1.5';
+        }
+      });
+    }
+
+    // Simple FAQ Toggle
+    function toggleFaq(button) {
+      const content = button.nextElementSibling;
+      const icon = button.querySelector('.icon');
+      const isHidden = content.classList.contains('hidden');
+      if (isHidden) {
+        content.classList.remove('hidden');
+        icon.innerText = '−';
+      } else {
+        content.classList.add('hidden');
+        icon.innerText = '+';
+      }
+    }
+
+    // Auto-detect OS on initial load
+    window.addEventListener('DOMContentLoaded', () => {
+      const userAgent = (navigator.userAgent || '').toLowerCase();
+      const heroLabel = document.getElementById('hero-cta-label');
+      const heroBtn = document.getElementById('hero-cta-btn');
+
+      if (userAgent.indexOf('linux') !== -1) {
+        selectPlatform('linux');
+        if (heroLabel) heroLabel.innerText = 'Linux İçin İndir (.AppImage)';
+      } else if (userAgent.indexOf('mac') !== -1) {
+        selectPlatform('macos');
+        if (heroLabel) {
+          heroLabel.innerText = 'macOS Durumu (Geliştirme Aşamasında)';
+          heroBtn.className = 'w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-3.5 rounded-xl bg-surface-card border border-amber-500/40 text-cookie-300 font-bold text-base transition-all';
+        }
+      } else {
+        selectPlatform('windows');
+        if (heroLabel) heroLabel.innerText = 'Windows İçin İndir (.exe)';
+      }
+    });
+  </script>
+</body>
+</html>
