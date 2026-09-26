@@ -849,6 +849,62 @@ def update_instance_config(inst_id, updates):
         return None
 
 
+def register_installed_mod(inst_id, slug, filename, version=""):
+    """Profile kurulan modlari mods_manifest.json'a kaydeder.
+    Boylece Modrinth ekraninda 'yuklu' tespiti dosya adi tahminine kalmaz."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not slug:
+        return
+    manifest_path = os.path.join(inst_dir, "mods_manifest.json")
+    data = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+    data[str(slug)] = {
+        "filename": filename,
+        "version": version,
+        "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def get_instance_mod_manifest(inst_id):
+    """Profilin mod manifestini ve mods klasorundeki jar dosyalarini dondurur."""
+    inst_dir = get_instance_dir(inst_id)
+    manifest = {}
+    files = []
+    if not inst_dir:
+        return manifest, files
+
+    manifest_path = os.path.join(inst_dir, "mods_manifest.json")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            if not isinstance(manifest, dict):
+                manifest = {}
+        except Exception:
+            manifest = {}
+
+    mods_dir = os.path.join(inst_dir, "mods")
+    if os.path.isdir(mods_dir):
+        try:
+            files = [f for f in os.listdir(mods_dir) if f.lower().endswith(".jar")]
+        except Exception:
+            files = []
+
+    return manifest, files
+
+
 def install_modpack_background(inst_id, pack_url):
     add_log(f"📦 Modpack profili kuruluyor: {inst_id}")
     tmp_path = os.path.join(APP_DATA_DIR, f"tmp_{inst_id}.mrpack")
@@ -1423,6 +1479,18 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"success": True, "instances": list_instances()})
                 return
 
+            # 6b. Profildeki Kurulu Modlar (manifest + jar dosyalari)
+            if path == "/instances/mods":
+                inst_id = query.get("instance_id", [""])[0]
+                manifest, files = get_instance_mod_manifest(inst_id)
+                self.send_json({
+                    "success": True,
+                    "instance_id": inst_id,
+                    "manifest": manifest,
+                    "files": files,
+                })
+                return
+
             # 7. Offline Skin Bilgisi
             if path == "/skin/info":
                 username = query.get("username", ["Steve"])[0]
@@ -1574,6 +1642,11 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                             add_log(f"📥 Modrinth'ten indiriliyor: {fname} → {target_label}")
                             ModrinthFetcher.download_file(info["url"], dest)
                             add_log(f"✓ Başarıyla kuruldu: {fname}")
+                        if instance_id:
+                            register_installed_mod(
+                                instance_id, slug, fname,
+                                info.get("version_number") or "",
+                            )
                         self.send_json({
                             "success": True,
                             "filename": fname,

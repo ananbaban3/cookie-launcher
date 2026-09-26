@@ -1904,3 +1904,54 @@ body::before {
     transition-duration: 0.001s !important;
   }
 }
+
+/* ================== YÜKLÜ MOD DURUMU & GİZLEME ================== */
+.mod-hide-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.mod-hide-toggle:hover {
+  color: #fff;
+}
+
+.mod-hide-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.mod-card.installed {
+  opacity: 0.55;
+  filter: grayscale(0.8);
+}
+
+.mod-card.installed:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--border-subtle);
+}
+
+.mod-installed-chip {
+  font-size: 10px;
+  color: var(--accent-green);
+  background: rgba(166, 227, 161, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.btn-mod-dl:disabled {
+  background: rgba(166, 227, 161, 0.12);
+  border-color: rgba(166, 227, 161, 0.35);
+  color: var(--accent-green);
+  cursor: not-allowed;
+}

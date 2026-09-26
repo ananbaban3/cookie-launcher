@@ -42,6 +42,9 @@ const state = {
   modrinthHasMore: true,
   modrinthLoading: false,
   packPollTimer: null,
+  hideInstalled: localStorage.getItem("cl_hide_installed") === "true",
+  installedModSlugs: new Set(),
+  installedModFiles: [],
 
   // 3D Skin Viewer
   skinViewer: null,
@@ -474,6 +477,23 @@ function setupEventListeners() {
     mSortSelect.addEventListener("change", (e) => {
       state.modrinthSort = e.target.value;
       fetchModrinth(true);
+    });
+  }
+
+  // Yüklü modları gizleme anahtarı
+  const hideInstalledToggle = document.getElementById("hideInstalledToggle");
+  if (hideInstalledToggle) {
+    hideInstalledToggle.checked = state.hideInstalled;
+    hideInstalledToggle.addEventListener("change", (e) => {
+      state.hideInstalled = e.target.checked;
+      localStorage.setItem("cl_hide_installed", state.hideInstalled);
+      applyInstalledStates();
+      showToast(
+        state.hideInstalled
+          ? "Yüklü modlar listeden gizlendi."
+          : "Yüklü modlar tekrar gösteriliyor.",
+        "info"
+      );
     });
   }
 
@@ -1244,12 +1264,78 @@ function updateProgressUI(data) {
 }
 
 // ================== MODRINTH İÇERİK MERKEZİ ==================
+function isModInstalled(hit) {
+  if (!hit || hit.project_type === "modpack") return false;
+  const slug = String(hit.slug || "").toLowerCase();
+  if (!slug) return false;
+
+  if (state.installedModSlugs.has(slug)) return true;
+
+  const patterns = [slug, slug.replace(/-/g, "_"), slug.replace(/_/g, "-")];
+  return state.installedModFiles.some(file => {
+    const name = String(file).toLowerCase();
+    return patterns.some(p =>
+      name === `${p}.jar` ||
+      name.startsWith(`${p}-`) ||
+      name.startsWith(`${p}_`) ||
+      name.includes(`-${p}-`) ||
+      name.includes(`_${p}_`)
+    );
+  });
+}
+
+async function refreshInstalledMods() {
+  state.installedModSlugs = new Set();
+  state.installedModFiles = [];
+
+  const target = getModrinthTarget();
+  if (!target) return;
+
+  const data = await apiGet(`/api/instances/mods?instance_id=${encodeURIComponent(target.id)}`, 8000);
+  if (!data || data.success !== true) return;
+
+  const manifest = data.manifest || {};
+  Object.keys(manifest).forEach(slug => state.installedModSlugs.add(String(slug).toLowerCase()));
+  state.installedModFiles = Array.isArray(data.files) ? data.files : [];
+}
+
+function applyInstalledStates() {
+  document.querySelectorAll(".mod-card[data-slug]").forEach(card => {
+    const slug = card.getAttribute("data-slug");
+    const installed = state.installedModSlugs.has(String(slug).toLowerCase()) ||
+      isModInstalled({ slug: slug, project_type: "mod" });
+
+    if (installed) {
+      card.classList.add("installed");
+      const btn = card.querySelector(".btn-mod-dl");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "✓ Yüklü";
+      }
+      if (state.hideInstalled) {
+        card.style.display = "none";
+        return;
+      }
+    } else {
+      card.classList.remove("installed");
+      const btn = card.querySelector(".btn-mod-dl");
+      if (btn && btn.dataset.kind !== "modpack") {
+        btn.disabled = false;
+        btn.textContent = "⚡ Hızlı Kur";
+      }
+    }
+    card.style.display = "";
+  });
+}
+
 function buildModCard(hit, index) {
   const target = getModrinthTarget();
   const isModpack = (hit.project_type === "modpack") || (state.modrinthType === "modpack");
+  const installed = !isModpack && isModInstalled(hit);
 
   const card = document.createElement("div");
-  card.className = "mod-card";
+  card.className = "mod-card" + (installed ? " installed" : "");
+  card.dataset.slug = hit.slug || "";
   card.style.animationDelay = `${Math.min(index * 0.03, 0.5)}s`;
 
   const iconBox = document.createElement("div");
@@ -1268,6 +1354,10 @@ function buildModCard(hit, index) {
     iconBox.textContent = isModpack ? "📦" : "🧩";
   }
 
+  let buttonLabel = "⚡ Hızlı Kur";
+  if (isModpack) buttonLabel = "📦 Profil Olarak Kur";
+  else if (installed) buttonLabel = "✓ Yüklü";
+
   const content = document.createElement("div");
   content.className = "mod-content";
   content.innerHTML = `
@@ -1275,14 +1365,23 @@ function buildModCard(hit, index) {
     <p class="mod-desc">${escapeHtml(hit.description || "Açıklama bulunmuyor.")}</p>
     <div class="mod-bottom-row">
       <span style="font-size: 11px; color: var(--text-muted);">⬇ ${(hit.downloads || 0).toLocaleString()}</span>
-      ${target ? `<span class="mod-target-chip" title="Kurulum hedefi: ${escapeHtml(target.name)}">📥 ${escapeHtml(target.name)}</span>` : ""}
-      <button class="btn-mod-dl">${isModpack ? "📦 Profil Olarak Kur" : "⚡ Hızlı Kur"}</button>
+      ${installed ? '<span class="mod-installed-chip">✓ Bu profilde yüklü</span>' : ""}
+      ${!installed && target ? `<span class="mod-target-chip" title="Kurulum hedefi: ${escapeHtml(target.name)}">📥 ${escapeHtml(target.name)}</span>` : ""}
+      <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : "mod"}">${buttonLabel}</button>
     </div>
   `;
 
   const dlButton = content.querySelector(".btn-mod-dl");
   if (dlButton) {
-    dlButton.addEventListener("click", () => installModrinthProject(hit, dlButton));
+    if (installed) {
+      dlButton.disabled = true;
+    } else {
+      dlButton.addEventListener("click", () => installModrinthProject(hit, dlButton));
+    }
+  }
+
+  if (installed && state.hideInstalled) {
+    card.style.display = "none";
   }
 
   card.appendChild(iconBox);
@@ -1325,6 +1424,7 @@ async function fetchModrinth(reset = true) {
     state.modrinthHits = [];
     state.modrinthHasMore = true;
     wrap.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
+    await refreshInstalledMods();
   } else {
     updateModrinthFooter();
   }
@@ -1464,6 +1564,8 @@ async function downloadModrinthProject(slug, buttonEl) {
 
   if (data && data.success) {
     showToast(`✓ ${data.filename || slug} → "${target.name}" profiline kuruldu.`, "success");
+    await refreshInstalledMods();
+    applyInstalledStates();
     loadInstances();
   } else if (data && data.error) {
     showToast(`⚠️ ${data.error}`, "error");
