@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CookieLauncher 🍪</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- =================== BAŞLIK ÇUBUĞU (TITLEBAR) =================== -->
+  <header class="titlebar" data-tauri-drag-region="deep">
+    <div class="titlebar-left" data-tauri-drag-region="deep">
+      <img src="cookie-logo.png" alt="Logo" class="launcher-logo" onerror="this.style.display='none'">
+      <span class="app-title">CookieLauncher</span>
+      <span class="badge-opt">⚡ OPTİMİZE MOTORU</span>
+    </div>
+
+    <!-- Hızlı Klasörler Menüsü -->
+    <div class="titlebar-center">
+      <div class="quick-dropdown">
+        <button class="btn-titlebar-action" id="btnQuickFolders">
+          <span>📁 Klasörler ▾</span>
+        </button>
+        <div class="dropdown-menu" id="quickFoldersMenu">
+          <button class="dropdown-item" data-folder="">📂 .minecraft Ana Klasörü</button>
+          <button class="dropdown-item" data-folder="mods">🧩 mods Klasörü</button>
+          <button class="dropdown-item" data-folder="instances">⚡ instances (Profiller)</button>
+          <button class="dropdown-item" data-folder="saves">💾 saves (Dünyalar)</button>
+          <button class="dropdown-item" data-folder="screenshots">📸 screenshots Klasörü</button>
+          <button class="dropdown-item" data-folder="crash-reports">⚠️ crash-reports Klasörü</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pencere Kontrolleri -->
+    <div class="titlebar-controls">
+      <button class="control-btn" id="btnWinMinimize" title="Simge Durumuna Küçült">−</button>
+      <button class="control-btn" id="btnWinMaximize" title="Ekranı Kapla">□</button>
+      <button class="control-btn btn-close" id="btnWinClose" title="Kapat">✕</button>
+    </div>
+  </header>
+
+  <!-- =================== ANA DÜZEN =================== -->
+  <div class="app-layout">
+    <!-- Üst Gezinme Sekmeleri (Navbar) -->
+    <nav class="top-nav">
+      <div class="nav-links">
+        <button class="nav-tab active" data-tab="tab-play">
+          <span class="nav-icon">🎮</span>
+          <span>OYNA</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-instances">
+          <span class="nav-icon">🗂️</span>
+          <span>PROFİLLER</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-modrinth">
+          <span class="nav-icon">🧩</span>
+          <span>MODRINTH KEŞFET</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-gallery">
+          <span class="nav-icon">📸</span>
+          <span>GALERİ</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-console">
+          <span class="nav-icon">💻</span>
+          <span>KONSOL</span>
+        </button>
+      </div>
+
+      <div class="nav-right">
+        <div class="connection-status">
+          <span class="status-indicator"></span>
+          <span id="engineStatusText">Core Hazır</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- İçerik Alanı -->
+    <main class="main-content">
+
+      <!-- =================== SEKME 1: OYNA (ANA SAYFA) =================== -->
+      <section class="tab-pane active" id="tab-play">
+        <div class="play-grid">
+          
+          <!-- SOL SÜTUN: 3D Skin Önizleme -->
+          <div class="skin-card">
+            <div class="card-header">
+              <span class="card-icon">🕺</span>
+              <h3>3D Karakter Önizleme</h3>
+            </div>
+            
+            <div class="skin-canvas-wrapper">
+              <canvas id="skinCanvas" width="280" height="340"></canvas>
+            </div>
+
+            <div class="skin-controls-row">
+              <button class="btn-skin-anim active" data-anim="walk">Yürü</button>
+              <button class="btn-skin-anim" data-anim="run">Koş</button>
+              <button class="btn-skin-anim" data-anim="idle">Dur</button>
+              <button class="btn-skin-anim" data-anim="wave">El Salla</button>
+              <button class="btn-skin-anim" id="btnResetSkinCam" title="Kamerayı Sıfırla">↺</button>
+            </div>
+
+            <div class="skin-upload-row">
+              <button class="btn-secondary" id="btnUploadSkin">🎨 Skin Yükle (PNG)</button>
+              <button class="btn-secondary" id="btnSkinUrl">🔗 URL ile Ekle</button>
+              <input type="file" id="skinFileInput" accept="image/png" style="display: none;">
+            </div>
+            <div class="skin-url-row" id="skinUrlRow" style="display: none;">
+              <input type="text" id="skinUrlInput" class="styled-input" placeholder="https://ornek.com/skin.png" autocomplete="off" spellcheck="false">
+              <button class="btn-secondary" id="btnSaveSkinUrl">Kaydet</button>
+            </div>
+            <p class="skin-hint">Yüklediğiniz skin yalnızca launcher önizlemesinde kullanılır.</p>
+          </div>
+
+          <!-- SAĞ SÜTUN: Başlatma & Yapılandırma Paneli -->
+          <div class="launch-card">
+
+            <!-- 0. Aktif Profil Seçici -->
+            <div class="form-group">
+              <div class="label-row">
+                <label for="activeInstanceSelect">Aktif Profil</label>
+                <span class="label-hint">Modlar bu profilin izole klasörüne kurulur</span>
+              </div>
+              <div class="input-with-icon">
+                <span class="input-icon">🗂️</span>
+                <select id="activeInstanceSelect" class="styled-select styled-select-lg"></select>
+              </div>
+            </div>
+            
+            <!-- 1. Oyuncu Adı Girişi -->
+            <div class="form-group">
+              <div class="label-row">
+                <label for="usernameInput">Oyuncu Adı (Nickname)</label>
+                <span class="label-badge">Çevrimdışı / Otomatik Skin</span>
+              </div>
+              <div class="input-with-icon">
+                <span class="input-icon">👤</span>
+                <input type="text" id="usernameInput" class="styled-input" placeholder="Oyuncu adınızı yazın..." value="Steve" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+
+            <!-- 2. Sürüm Seçim Alanı (Klavyeden Doğrudan Giriş + Sürüm Seç Butonu) -->
+            <div class="form-group">
+              <div class="label-row">
+                <label for="versionInput">Minecraft Sürümü</label>
+                <span class="label-hint" id="versionLabelHint">İstediğiniz sürümü doğrudan yazabilir veya listeden seçebilirsiniz</span>
+              </div>
+              <div class="version-input-row">
+                <div class="input-with-icon flex-1">
+                  <span class="input-icon">📦</span>
+                  <input type="text" id="versionInput" class="styled-input" placeholder="Sürüm yazın... (örn: 1.20.1, 1.8.9, 26.2)" list="versionsDatalist" autocomplete="off" spellcheck="false">
+                  <datalist id="versionsDatalist"></datalist>
+                </div>
+                <button type="button" class="btn-browse-version" id="btnOpenVersionModal">
+                  <span>📋 Sürümleri Filtrele & Seç</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 3. Mod Yükleyici (Loader) Kartları -->
+            <div class="form-group">
+              <label>Mod Yükleyici Motoru</label>
+              <div class="loader-cards-grid">
+                <label class="loader-card active">
+                  <input type="radio" name="loaderRadio" value="fabric" checked>
+                  <div class="l-card-inner">
+                    <span class="l-icon">⚡</span>
+                    <div class="l-info">
+                      <span class="l-title">Fabric</span>
+                      <span class="l-desc">Yüksek Performans (Önerilen)</span>
+                    </div>
+                  </div>
+                </label>
+
+                <label class="loader-card">
+                  <input type="radio" name="loaderRadio" value="forge">
+                  <div class="l-card-inner">
+                    <span class="l-icon">🔨</span>
+                    <div class="l-info">
+                      <span class="l-title">Forge</span>
+                      <span class="l-desc">Geleneksel Modlar</span>
+                    </div>
+                  </div>
+                </label>
+
+                <label class="loader-card">
+                  <input type="radio" name="loaderRadio" value="vanilla">
+                  <div class="l-card-inner">
+                    <span class="l-icon">🧱</span>
+                    <div class="l-info">
+                      <span class="l-title">Vanilla</span>
+                      <span class="l-desc">Saf Minecraft</span>
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- 4. COOKIE LAUNCHER ÖZEL OPTİMİZE MOTORU (Anahtar) -->
+            <div class="optimize-banner-row">
+              <div class="opt-banner-left">
+                <span class="opt-lightning">⚡</span>
+                <div class="opt-banner-text">
+                  <span class="opt-banner-title">COOKIE LAUNCHER ÖZEL OPTİMİZE</span>
+                  <span class="opt-banner-desc">Sodium + Lithium + FerriteCore + Indium modlarını otomatik kurar, RAM ve GC parametrelerini ayarlar.</span>
+                </div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cookieOptimizeToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- 5. RAM Ayarı -->
+            <div class="form-group ram-group">
+              <div class="label-row">
+                <label for="ramSlider">Ayrılan Bellek (RAM)</label>
+                <span class="ram-display-badge" id="ramValueText">4 GB</span>
+              </div>
+              <input type="range" id="ramSlider" class="styled-range" min="2" max="16" step="1" value="4">
+              <div class="range-marks">
+                <span>2 GB</span>
+                <span>4 GB</span>
+                <span>8 GB</span>
+                <span>16 GB</span>
+              </div>
+            </div>
+
+            <!-- 6. Dev OYUNU BAŞLAT Butonu -->
+            <div class="launch-action-box">
+              <button class="btn-mega-launch" id="btnLaunchGame">
+                <span class="btn-glow-pulse"></span>
+                <span class="btn-icon">▶</span>
+                <span class="btn-text" id="btnLaunchText">OYUNU BAŞLAT</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- =================== SEKME 2: PROFİLLER (INSTANCES) =================== -->
+      <section class="tab-pane" id="tab-instances">
+        <div class="section-titlebar">
+          <div>
+            <h2 class="title-text">Oyun Profilleri (Instances)</h2>
+            <p class="subtitle-text">Her profil kendi sürümüne, yükleyicisine ve izole mod klasörüne sahiptir. Modrinth'ten kurduğunuz modlar aktif profilin içine gider.</p>
+          </div>
+          <button class="btn-primary-action" id="btnCreateInstance">➕ Yeni Profil Oluştur</button>
+        </div>
+        <div class="instances-grid" id="instancesGridWrap"></div>
+      </section>
+
+      <!-- =================== SEKME 3: MODRINTH KEŞFET =================== -->
+      <section class="tab-pane" id="tab-modrinth">
+        <div class="section-titlebar">
+          <div>
+            <h2 class="title-text">Modrinth İçerik Merkezi</h2>
+            <p class="subtitle-text">Minecraft için yüzbinlerce mod, modpack, shader ve doku paketini tek tıkla kurun.</p>
+          </div>
+          <div class="search-box">
+            <input type="text" id="modrinthSearchInput" class="styled-input search-input" placeholder="Mod veya paket ara...">
+            <button class="btn-search-go" id="btnDoSearch">🔍</button>
+          </div>
+        </div>
+
+        <!-- Kategori Butonları -->
+        <div class="cat-pill-row">
+          <button class="cat-pill active" data-type="mod">🧩 Modlar</button>
+          <button class="cat-pill" data-type="modpack">📦 Mod Paketleri</button>
+          <button class="cat-pill" data-type="shader">✨ Shaderlar</button>
+          <button class="cat-pill" data-type="resourcepack">🎨 Doku Paketleri</button>
+        </div>
+
+        <!-- Filtre Seçimleri -->
+        <div class="modrinth-filter-bar">
+          <div class="m-filter-group">
+            <label>Yükleyici:</label>
+            <select id="modrinthLoaderSelect" class="styled-select">
+              <option value="fabric">Fabric</option>
+              <option value="forge">Forge</option>
+              <option value="Tümü">Tümü</option>
+            </select>
+          </div>
+          <div class="m-filter-group">
+            <label>Sıralama:</label>
+            <select id="modrinthSortSelect" class="styled-select">
+              <option value="downloads">En Çok İndirilen</option>
+              <option value="relevance">Alaka Düzeyi</option>
+              <option value="newest">En Yeni</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Kurulum Hedefi (Profil) Çubuğu -->
+        <div class="modrinth-target-bar">
+          <span class="target-label">📥 Kurulum Hedefi:</span>
+          <select id="modrinthInstanceSelect" class="styled-select"></select>
+          <span class="target-hint" id="modrinthTargetHint">Modlar seçilen profilin mods klasörüne kurulur.</span>
+        </div>
+
+        <!-- Kart Grid Listesi -->
+        <div class="modrinth-cards-grid" id="modrinthResultsWrap">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <span>İçerikler taranıyor...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- =================== SEKME 3: EKRAN GÖRÜNTÜLERİ =================== -->
+      <section class="tab-pane" id="tab-gallery">
+        <div class="section-titlebar">
+          <div>
+            <h2 class="title-text">Ekran Görüntüleri Galerisi</h2>
+            <p class="subtitle-text">Oyunda F2 tuşuyla çektiğiniz tüm anlar burada saklanır.</p>
+          </div>
+          <button class="btn-secondary" id="btnOpenScreenshotsFolder">📂 Klasörü Aç</button>
+        </div>
+        <div class="gallery-grid" id="screenshotsGridWrap">
+          <!-- JS dolduracak -->
+        </div>
+      </section>
+
+      <!-- =================== SEKME 4: KONSOL =================== -->
+      <section class="tab-pane" id="tab-console">
+        <div class="section-titlebar">
+          <div>
+            <h2 class="title-text">Canlı Oyun Konsolu</h2>
+            <p class="subtitle-text">Oyunun ve başlatıcının arka plan günlüklerini anlık takip edin.</p>
+          </div>
+          <button class="btn-secondary" id="btnClearConsole">Temizle</button>
+        </div>
+        <pre class="console-output" id="consoleOutput">CookieLauncher Core Konsolu Hazır...\n</pre>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- =================== MODAL: YENİ PROFİL OLUŞTUR =================== -->
+  <div class="modal-backdrop" id="createInstanceModal" style="display: none;">
+    <div class="modal-window create-instance-modal">
+      <div class="modal-top">
+        <div class="modal-top-title">
+          <span class="m-icon">🗂️</span>
+          <h3>Yeni Profil Oluştur</h3>
+        </div>
+        <button class="btn-close-modal" id="btnCloseCreateInstanceModal">✕</button>
+      </div>
+
+      <div class="ci-body">
+        <div class="form-group">
+          <label for="instanceNameInput">Profil Adı</label>
+          <input type="text" id="instanceNameInput" class="styled-input" placeholder="örn: Optimize Survival" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label for="instanceVersionInput">Minecraft Sürümü</label>
+          <input type="text" id="instanceVersionInput" class="styled-input" list="versionsDatalist" placeholder="örn: 1.20.1" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label for="instanceIconInput">Profil Resmi (İkon URL — opsiyonel)</label>
+          <input type="text" id="instanceIconInput" class="styled-input" placeholder="https://.../ikon.png" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <span class="ci-label">Mod Yükleyici</span>
+          <div class="loader-cards-grid">
+            <label class="loader-card active">
+              <input type="radio" name="instanceLoaderRadio" value="fabric" checked>
+              <div class="l-card-inner">
+                <span class="l-icon">⚡</span>
+                <div class="l-info">
+                  <span class="l-title">Fabric</span>
+                  <span class="l-desc">Yüksek Performans</span>
+                </div>
+              </div>
+            </label>
+            <label class="loader-card">
+              <input type="radio" name="instanceLoaderRadio" value="forge">
+              <div class="l-card-inner">
+                <span class="l-icon">🔨</span>
+                <div class="l-info">
+                  <span class="l-title">Forge</span>
+                  <span class="l-desc">Geleneksel</span>
+                </div>
+              </div>
+            </label>
+            <label class="loader-card">
+              <input type="radio" name="instanceLoaderRadio" value="vanilla">
+              <div class="l-card-inner">
+                <span class="l-icon">🧱</span>
+                <div class="l-info">
+                  <span class="l-title">Vanilla</span>
+                  <span class="l-desc">Saf Minecraft</span>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-bottom">
+        <span class="modal-tip-text">💡 Profil oluşturulunca otomatik olarak aktif edilir.</span>
+        <div class="ci-actions">
+          <button class="btn-secondary" id="btnCancelCreateInstance">Vazgeç</button>
+          <button class="btn-primary-action" id="btnConfirmCreateInstance">Oluştur ve Aktif Yap</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
+  <div class="modal-backdrop" id="versionSelectorModal" style="display: none;">
+    <div class="modal-window version-modal-window">
+      <div class="modal-top">
+        <div class="modal-top-title">
+          <span class="m-icon">📦</span>
+          <h3>Minecraft Sürümü Seç</h3>
+        </div>
+        <button class="btn-close-modal" id="btnCloseVersionSelectorModal">✕</button>
+      </div>
+
+      <div class="version-selector-layout">
+        <!-- SOL SÜTUN: Arama Kutusu & Sürüm Tablosu -->
+        <div class="version-table-col">
+          <div class="version-search-input-box">
+            <span class="v-search-icon">🔍</span>
+            <input type="text" id="versionTableSearchInput" class="styled-input" placeholder="Sürüm ara... (örn: 1.20, snapshot, b1.8...)" autocomplete="off">
+            <button class="btn-clear-search" id="btnClearVersionSearch" style="display: none;">✕</button>
+          </div>
+
+          <div class="table-scroll-area">
+            <table class="version-table" id="versionTable">
+              <thead>
+                <tr>
+                  <th style="width: 45%;">Sürüm Adı</th>
+                  <th style="width: 25%;">Tür</th>
+                  <th style="width: 30%; text-align: right;">Durum</th>
+                </tr>
+              </thead>
+              <tbody id="versionTableListBody">
+                <!-- Dinamik olarak JS tarafından doldurulacak -->
+              </tbody>
+            </table>
+            <div class="no-results-msg" id="versionNoResults" style="display: none;">
+              <span>Filtrelere ve arama kriterinize uygun sürüm bulunamadı.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SAĞ SÜTUN: Bağımsız Düşey Filtre Paneli (Filter Sidebar) -->
+        <aside class="version-filter-sidebar">
+          <h4 class="filter-sidebar-title">Filtrele</h4>
+          <div class="filter-checkbox-list">
+            
+            <!-- 1. Altın/Neon Parıltılı Özel Optimize Seçeneği -->
+            <label class="filter-cb-item filter-cb-optimized">
+              <input type="checkbox" id="cbFilterOptimized" class="version-filter-cb" data-category="optimized">
+              <span class="cb-checkmark cb-opt-check"></span>
+              <span class="cb-text-bold">⚡ COOKIE LAUNCHER ÖZEL OPTİMİZE</span>
+            </label>
+
+            <!-- 2. Sürümler (Releases) - Varsayılan Seçili! -->
+            <label class="filter-cb-item">
+              <input type="checkbox" id="cbFilterReleases" class="version-filter-cb" data-category="release" checked>
+              <span class="cb-checkmark"></span>
+              <span>Sürümler (Releases)</span>
+            </label>
+
+            <!-- 3. Anlık Sürümler (Snapshots) -->
+            <label class="filter-cb-item">
+              <input type="checkbox" id="cbFilterSnapshots" class="version-filter-cb" data-category="snapshot">
+              <span class="cb-checkmark"></span>
+              <span>Anlık Sürümler (Snapshots)</span>
+            </label>
+
+            <!-- 4. Betalar (Betas) -->
+            <label class="filter-cb-item">
+              <input type="checkbox" id="cbFilterBetas" class="version-filter-cb" data-category="beta">
+              <span class="cb-checkmark"></span>
+              <span>Betalar (Betas)</span>
+            </label>
+
+            <!-- 5. Alfalar (Alphas) -->
+            <label class="filter-cb-item">
+              <input type="checkbox" id="cbFilterAlphas" class="version-filter-cb" data-category="alpha">
+              <span class="cb-checkmark"></span>
+              <span>Alfalar (Alphas)</span>
+            </label>
+
+            <!-- 6. Deneysel Sürümler (Experimental) -->
+            <label class="filter-cb-item">
+              <input type="checkbox" id="cbFilterExperimental" class="version-filter-cb" data-category="experimental">
+              <span class="cb-checkmark"></span>
+              <span>Deneysel Sürümler (Exp)</span>
+            </label>
+          </div>
+
+          <div class="filter-info-box">
+            <span id="versionFilteredCountText">0 sürüm</span>
+          </div>
+        </aside>
+      </div>
+
+      <div class="modal-bottom">
+        <span class="modal-tip-text">💡 Seçmek istediğiniz sürümün satırına tıklamanız yeterlidir.</span>
+        <button class="btn-secondary" id="btnCancelVersionSelectorModal">Kapat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== MODAL: CANLI İLERLEME ÇUBUĞU (NON-BLOCKING LAUNCH) =================== -->
+  <div class="modal-backdrop" id="launchProgressModal" style="display: none;">
+    <div class="modal-window progress-modal-window">
+      <div class="progress-modal-inner">
+        <div class="progress-spinner-glow">
+          <div class="pulse-ring"></div>
+          <span class="progress-cube-icon">⛏️</span>
+        </div>
+
+        <h3 class="progress-title">Minecraft Hazırlanıyor...</h3>
+        <p class="progress-status-msg" id="launchProgressStatusText">Bileşenler kontrol ediliyor...</p>
+        <p class="progress-detail-msg" id="launchProgressDetailText">İndirme akışı başlatılıyor...</p>
+
+        <!-- Canlı İlerleme Çubuğu -->
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="launchProgressBarFill" style="width: 0%;"></div>
+        </div>
+
+        <div class="progress-meta-row">
+          <span class="progress-percent" id="launchProgressPercent">0%</span>
+          <span class="progress-mb-text" id="launchProgressMbText">⬇ 0.0 MB</span>
+          <span class="progress-engine-tag">⚡ Cookie Launcher Engine</span>
+        </div>
+
+        <button class="btn-dismiss-progress" id="btnDismissProgressModal">Arka Planda Devam Et</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Bildirimleri -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Bağımlılıklar & JS -->
+  <script src="libs/skinview3d.bundle.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

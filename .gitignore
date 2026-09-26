@@ -1,0 +1,31 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller (backend core build ciktilari)
+build/
+dist/
+*.spec
+backend/cookielauncher-core
+backend/cookielauncher-core.exe
+
+# Launcher calisma verisi / loglar
+.cookie_launcher/
+*.log
+
+# Editör / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
