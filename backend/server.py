@@ -20,6 +20,7 @@ import subprocess
 import traceback
 import http.server
 import socketserver
+from collections import OrderedDict
 from urllib.parse import urlparse, parse_qs
 
 try:
@@ -62,6 +63,13 @@ os.makedirs(MODS_QUARANTINE_DIR, exist_ok=True)
 
 MODS_CACHE_FILE = os.path.join(APP_DATA_DIR, "mod_cache.json")
 VERSIONS_CACHE_FILE = os.path.join(APP_DATA_DIR, "versions_manifest_cache.json")
+
+# Onbellek sinirlari: sinirsiz buyumeyi (bellek + disk) engeller.
+# Modrinth arama/surum onbellegi LRU ile kirpilir; mod meta onbellegi de
+# guncellenen/silinen modlar icin kalici kayit biriktirmemelidir.
+MODRINTH_CACHE_MAX = 600
+CONTENT_META_CACHE_MAX = 2000
+CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
@@ -557,28 +565,72 @@ class ModrinthFetcher:
     HEADERS = {
         "User-Agent": "Freesm/CookieLauncher/2.0.0 (https://github.com/cookie-launcher; support@cookielauncher.app)"
     }
-    _cache = {}
+    # Arama + surum cozumleme onbellegi. OrderedDict + ust sinir ile LRU
+    # davranisi uygulanir; aksi hâlde her farkli arama kalici olarak birikir
+    # (bellek ve mod_cache.json sinirsiz buyur).
+    _cache = OrderedDict()
     _cache_lock = threading.Lock()
+    _last_save = 0.0
+    _loaded = False
+
+    @classmethod
+    def _trim(cls):
+        """Ust siniri asan en eski kayitlari atar. Cagiran kilit tutmalidir."""
+        while len(cls._cache) > MODRINTH_CACHE_MAX:
+            cls._cache.popitem(last=False)
 
     @classmethod
     def load_cache(cls):
         with cls._cache_lock:
-            if os.path.exists(MODS_CACHE_FILE):
-                try:
-                    with open(MODS_CACHE_FILE, "r", encoding="utf-8") as f:
-                        cls._cache = json.load(f)
-                except Exception:
-                    cls._cache = {}
+            if not cls._loaded:
+                cls._loaded = True
+                if os.path.exists(MODS_CACHE_FILE):
+                    try:
+                        with open(MODS_CACHE_FILE, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if isinstance(data, dict):
+                            # Diskte birikmis negatif (None) kayitlari temizle:
+                            # kalici negatif onbellek, bir mod sonradan yayinlansa
+                            # bile asla yeniden sorgulanmamasina yol acar.
+                            cls._cache = OrderedDict(
+                                (k, v) for k, v in data.items() if v is not None
+                            )
+                    except Exception:
+                        cls._cache = OrderedDict()
+                cls._trim()
             return dict(cls._cache)
 
     @classmethod
-    def save_cache(cls):
-        try:
-            with cls._cache_lock:
-                with open(MODS_CACHE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(cls._cache, f, indent=2)
-        except Exception:
-            pass
+    def _remember(cls, key, value, persist=True):
+        """Onbellege kayit ekler, sinirlari uygular ve (gerekirse) diske yazar."""
+        with cls._cache_lock:
+            cls._cache.pop(key, None)
+            cls._cache[key] = value
+            cls._trim()
+        if persist:
+            cls.save_cache()
+
+    @classmethod
+    def save_cache(cls, force=False):
+        """Onbellegi atomik olarak yazar. Yazimlar birlestirilir (throttle),
+        boylece her arama tum dosyanin yeniden yazilmasina yol acmaz.
+        Negatif kayitlar diske YAZILMAZ (yalnizca oturum icinde gecerlidir)."""
+        now = time.time()
+        with cls._cache_lock:
+            if not force and (now - cls._last_save) < CACHE_SAVE_MIN_INTERVAL:
+                return
+            cls._last_save = now
+            tmp_path = MODS_CACHE_FILE + ".tmp"
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump({k: v for k, v in cls._cache.items() if v is not None}, f, indent=2)
+                os.replace(tmp_path, MODS_CACHE_FILE)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
 
     @classmethod
     def search(cls, query="", project_type="mod", game_version="", loader="", index="downloads", limit=20, offset=0):
@@ -649,16 +701,12 @@ class ModrinthFetcher:
                                 "size": primary_file.get("size", 0),
                                 "version_number": v.get("version_number"),
                             }
-                            with cls._cache_lock:
-                                cls._cache[cache_key] = res
-                            cls.save_cache()
+                            cls._remember(cache_key, res)
                             return res
         except Exception as e:
             add_log(f"Modrinth mod bilgisi uyarisi ({project_slug}): {e}")
 
-        with cls._cache_lock:
-            cls._cache[cache_key] = None
-        cls.save_cache()
+        cls._remember(cache_key, None, persist=False)
         return None
 
     @classmethod
@@ -720,9 +768,7 @@ class ModrinthFetcher:
             add_log(f"Modrinth dosya bilgisi uyarisi ({project_slug}): {e}")
 
         if chosen:
-            with cls._cache_lock:
-                cls._cache[cache_key] = chosen
-            cls.save_cache()
+            cls._remember(cache_key, chosen)
         return chosen
 
     @classmethod
@@ -953,8 +999,23 @@ def register_installed_content(inst_id, category, slug, filename, version=""):
     save_content_manifest(inst_id, data)
 
 
-_CONTENT_META_CACHE = {}
+# (dosya_yolu, mtime, boyut) -> meta. OrderedDict + ust sinir (LRU) kullanilir;
+# aksi hâlde her guncellenen veya silinen mod icin kalici bir kayit birikir.
+_CONTENT_META_CACHE = OrderedDict()
 _content_meta_lock = threading.Lock()
+
+
+def cache_content_metadata(cache_key, meta):
+    """Meta onbellegine yazar; sinir asilinca once silinmis dosyalarin
+    kayitlarini, yetmezse en eski girdileri temizler."""
+    with _content_meta_lock:
+        _CONTENT_META_CACHE.pop(cache_key, None)
+        _CONTENT_META_CACHE[cache_key] = meta
+        if len(_CONTENT_META_CACHE) > CONTENT_META_CACHE_MAX:
+            for k in [k for k in _CONTENT_META_CACHE if not os.path.exists(k[0])]:
+                _CONTENT_META_CACHE.pop(k, None)
+            while len(_CONTENT_META_CACHE) > CONTENT_META_CACHE_MAX:
+                _CONTENT_META_CACHE.popitem(last=False)
 
 
 def read_content_metadata(file_path, category):
@@ -971,6 +1032,8 @@ def read_content_metadata(file_path, category):
 
     with _content_meta_lock:
         cached = _CONTENT_META_CACHE.get(cache_key)
+        if cached is not None:
+            _CONTENT_META_CACHE.move_to_end(cache_key)
     if cached is not None:
         return cached
 
@@ -1072,8 +1135,7 @@ def read_content_metadata(file_path, category):
     except Exception:
         pass
 
-    with _content_meta_lock:
-        _CONTENT_META_CACHE[cache_key] = meta
+    cache_content_metadata(cache_key, meta)
     return meta
 
 
