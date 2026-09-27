@@ -20,7 +20,7 @@
 # ==============================================================================
 set -euo pipefail
 
-REPO="${COOKIE_REPO:-ananbaban3/cookie-launcher}"
+REPO="${COOKIE_REPO:-cookie-launcher/cookie-launcher}"
 API="https://api.github.com/repos/${REPO}/releases/latest"
 BIN_DIR="${HOME}/.local/bin"
 APP_NAME="CookieLauncher"

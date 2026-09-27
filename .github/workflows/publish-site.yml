@@ -1,0 +1,37 @@
+name: Publish site to cookie-launcher.github.io
+
+# docs/ klasoru tek kaynak; her push'ta kok adrese (user site) de yayinlanir.
+# Not: SITE_PUSH_TOKEN secret'i yoksa bu is sessizce atlanir (proje sayfasi
+# cookie-launcher.github.io/cookie-launcher/ yine de calismaya devam eder).
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["docs/**", ".github/workflows/publish-site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push docs/ to user-site repo
+        env:
+          SITE_TOKEN: ${{ secrets.SITE_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SITE_TOKEN}" ]; then
+            echo "SITE_PUSH_TOKEN tanimli degil, atlaniyor."
+            exit 0
+          fi
+          cd docs
+          git init -b main
+          git config user.name "CookieLauncher Bot"
+          git config user.email "cookielauncher@users.noreply.github.com"
+          git add -A
+          git commit -m "Site guncellemesi (kaynak commit: ${GITHUB_SHA::7})"
+          git push --force "https://x-access-token:${SITE_TOKEN}@github.com/cookie-launcher/cookie-launcher.github.io.git" main
