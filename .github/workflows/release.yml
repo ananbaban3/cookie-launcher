@@ -17,6 +17,13 @@ jobs:
             target: "x86_64-pc-windows-msvc"
           - platform: "ubuntu-22.04"
             target: "x86_64-unknown-linux-gnu"
+          # macOS: her mimari KENDI runner'inda derlenir; cunku PyInstaller
+          # cross-compile yapamaz -> Intel DMG'nin gomulu cekirdegi de Intel
+          # runner'da uretilmelidir.
+          - platform: "macos-latest"      # Apple Silicon (M serisi)
+            target: "aarch64-apple-darwin"
+          - platform: "macos-15-intel"    # Intel Mac
+            target: "x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -59,6 +66,21 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "CookieLauncher v__VERSION__"
-          releaseBody: "Modern Minecraft Launcher with 139+ versions, 3D skin viewer, Sodium optimization, and instances."
+          releaseBody: |
+            Açık kaynak, hafif Minecraft başlatıcı (Tauri + Python çekirdek, GPL-3.0).
+
+            **Paketler**
+            - **Windows:** Kurulum (.exe) — gömülü çekirdek sayesinde Python gerekmez
+            - **Linux:** AppImage / .deb / .rpm
+            - **macOS:** .dmg (Apple Silicon) ve .dmg (Intel) — *deneysel*
+
+            > **macOS notu:** DMG paketleri imzasız ve notarize edilmemiştir (Apple Developer
+            > sertifikası yok), bu yüzden Gatekeeper uyarı verebilir. Açmak için uygulamaya
+            > sağ tık → **Aç** yapın ya da şu komutu çalıştırın:
+            > `xattr -dr com.apple.quarantine /Applications/CookieLauncher.app`
+            > macOS derlemeleri geliştirici tarafından test edilmemiştir; sorun bildirirseniz seviniriz.
+
+            Mod kaynağı Modrinth'tir. Minecraft, Mojang Synergies AB'nin ticari markasıdır;
+            bu proje Mojang/Microsoft ile bağlantılı, sponsorlu veya onaylı değildir.
           releaseDraft: false
           prerelease: false
