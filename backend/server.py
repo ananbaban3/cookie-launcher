@@ -365,6 +365,10 @@ def get_total_system_memory_gb():
             stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
             return round(stat.ullTotalPhys / (1024 ** 3), 1)
+        elif sys.platform == "darwin":
+            # macOS: hw.memsize bayt cinsinden toplam RAM'i verir
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, timeout=3)
+            return round(int(out.strip()) / (1024 ** 3), 1)
     except Exception:
         pass
     return 8.0
@@ -416,6 +420,23 @@ def find_system_java_binary(required_major=21):
                     cand = os.path.join(drv, item, "bin", "java.exe")
                     if os.path.exists(cand) and cand not in candidates:
                         candidates.append(cand)
+    elif sys.platform == "darwin":
+        # macOS: Homebrew (arm64/intel), Temurin ve Oracle kurulumlari.
+        # Not: /usr/bin/java bir "stub"tir; JDK yoksa kurulum penceresi acar,
+        # bu yuzden bilerek listeye eklenmez (shutil.which zaten bulursa
+        # asagidaki -version kontrolunde elenir).
+        mac_paths = [
+            f"/opt/homebrew/opt/openjdk@{required_major}/bin/java",
+            f"/usr/local/opt/openjdk@{required_major}/bin/java",
+            f"/Library/Java/JavaVirtualMachines/temurin-{required_major}.jdk/Contents/Home/bin/java",
+            f"/Library/Java/JavaVirtualMachines/jdk-{required_major}.jdk/Contents/Home/bin/java",
+            "/Library/Java/JavaVirtualMachines/current/Contents/Home/bin/java",
+            "/opt/homebrew/bin/java",
+            "/usr/local/bin/java",
+        ]
+        for p in mac_paths:
+            if os.path.exists(p) and p not in candidates:
+                candidates.append(p)
 
     for cand in candidates:
         try:
