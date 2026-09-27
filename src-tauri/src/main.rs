@@ -38,7 +38,7 @@ fn backend_health_ok() -> bool {
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
     // Backend surumu degistiginde bu deger GUNCELLENMELI (backend/server.py API_VERSION ile ayni).
-    response.contains("\"api_version\": 9") || response.contains("\"api_version\":9")
+    response.contains("\"api_version\": 10") || response.contains("\"api_version\":10")
 }
 
 /// Backend'in bulunabilecegi tum kok dizinleri dondurur.
@@ -50,6 +50,15 @@ fn search_roots() -> Vec<PathBuf> {
         if let Some(dir) = exe.parent() {
             roots.push(dir.to_path_buf());
             roots.push(dir.join("resources"));
+            // macOS .app paketi: Tauri kaynaklari Contents/Resources icine
+            // koyar (ornek: CookieLauncher.app/Contents/Resources/backend/
+            // cookielauncher-core). Bu yol olmadan macOS'ta gomulu cekirdek
+            // bulunamayip python3'e dusuluyor, macOS'ta sistem python3
+            // olmadigi icin backend HIC baslamiyordu.
+            if let Some(contents) = dir.parent() {
+                roots.push(contents.join("Resources"));
+                roots.push(contents.join("Resources").join("backend"));
+            }
             // target/release -> target -> src-tauri -> proje koku
             if let Some(p1) = dir.parent() {
                 if let Some(p2) = p1.parent() {
@@ -165,6 +174,8 @@ fn start_backend_if_needed() {
         Some(s) => s,
         None => {
             eprintln!("CookieLauncher backend bulunamadi (cookielauncher-core veya backend/server.py).");
+            eprintln!("Aranan kok dizinler: {:?}", search_roots());
+            eprintln!("Platform: {}", std::env::consts::OS);
             return;
         }
     };

@@ -158,7 +158,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 9) {
+        if (data && Number(data.api_version) >= 10) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -1280,10 +1280,34 @@ async function npSearchPacks() {
   });
   const data = await apiGet(`/api/modrinth/search?${params.toString()}`, 20000);
   npState.packBusy = false;
+
+  if (data && data.error) {
+    npState.packHits = [];
+    const listEl = document.getElementById("npPackList");
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="np-pack-loading">
+          <span class="np-net-error">⚠️ ${escapeHtml(data.error)}</span>
+          <span class="np-net-hint">Ağ testi için: <code>http://127.0.0.1:18420/api/net-test</code></span>
+        </div>`;
+    }
+    npRenderPackDetail(null);
+    showNetErrorOnce(data.error);
+    return;
+  }
+
   npState.packHits = data && Array.isArray(data.hits) ? data.hits : [];
   npRenderPackList();
   if (npState.packHits.length > 0) npSelectPack(npState.packHits[0]);
   else npRenderPackDetail(null);
+}
+
+// Ag hatasini kullaniciya BIR KEZ toast olarak goster (spam yapmaz)
+function showNetErrorOnce(message) {
+  const key = String(message || "").slice(0, 120);
+  if (state.lastNetErrorShown === key) return;
+  state.lastNetErrorShown = key;
+  showToast("⚠️ Bağlantı hatası: " + message, "error");
 }
 
 function npRenderPackList() {
@@ -1489,6 +1513,10 @@ function renderModrinthTargetBar() {
 async function loadVersions() {
   const data = await apiGet("/api/versions", 12000);
 
+  if (data && data.error && !state.lastVersionErrorShown) {
+    state.lastVersionErrorShown = true;
+    showToast("⚠️ " + data.error, "error");
+  }
   if (data && Array.isArray(data.versions) && data.versions.length > 0) {
     state.versions = data.versions;
     state.installedVersions = Array.isArray(data.installed) ? data.installed : [];
@@ -2250,6 +2278,19 @@ async function fetchModrinth(reset = true) {
 
   const data = await apiGet(`/api/modrinth/search?${params.toString()}`, 15000);
   state.modrinthLoading = false;
+
+  if (data && data.error) {
+    if (reset) {
+      wrap.innerHTML = `
+        <div class="loading-state">
+          <span class="np-net-error">⚠️ ${escapeHtml(data.error)}</span>
+          <span class="np-net-hint">Ağ testi: <code>http://127.0.0.1:18420/api/net-test</code> adresini tarayıcıda açın.</span>
+        </div>`;
+      state.modrinthHasMore = false;
+    }
+    showNetErrorOnce(data.error);
+    return;
+  }
 
   if (!data) {
     if (reset) {

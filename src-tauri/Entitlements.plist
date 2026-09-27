@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Dis ag istemcisi: Modrinth / Mojang / Fabric API cagrilari.
+	     App Sandbox veya hardened runtime ile imzalanan surumlerde bu izin
+	     olmadan tum dis istekler engellenir (liste bos gelir). -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- WebKit (Tauri webview) icin JIT / islenmis bellek izinleri -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+
+	<!-- Gomulu Python cekirdegi (cookielauncher-core) ayri imzalandigi icin
+	     kutuphane dogrulamasi kapatilmalidir; aksi halde macOS alt sureci
+	     oldurur ve backend hic baslamaz. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

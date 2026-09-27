@@ -44,8 +44,55 @@ except Exception as _import_error:
         pass
     raise
 
-# Linux ortaminda DNS / IPv6 takilmalarini engellemek icin IPv4 zorla
-urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+# Linux ortaminda DNS / IPv6 takilmalarini engellemek icin IPv4 zorla.
+# ONEMLI: Bu yama yalnizca Linux icindir; macOS'ta IPv6-only aglarda
+# baglantiyi bozabildigi icin orada UYGULANMAZ.
+if sys.platform.startswith("linux"):
+    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+
+# ==================== SSL / KOK SERTIFIKA (macOS kritik) ====================
+# macOS'ta sistem Python'u veya paketlenmis Python, macOS Keychain kok
+# sertifikalarini goremeyebilir -> CERTIFICATE_VERIFY_FAILED. Bu durumda
+# istekler sessizce basarisiz olup listeler bos geliyordu. certifi'nin kendi
+# CA demeti kullanilir ve ortam degiskenleriyle requests/curl katmanina da
+# bildirilir.
+CERTIFI_PATH = ""
+try:
+    import certifi as _certifi
+    CERTIFI_PATH = _certifi.where()
+    os.environ.setdefault("SSL_CERT_FILE", CERTIFI_PATH)
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", CERTIFI_PATH)
+    os.environ.setdefault("CURL_CA_BUNDLE", CERTIFI_PATH)
+except Exception:
+    CERTIFI_PATH = ""
+
+try:
+    import ssl as _ssl
+    if CERTIFI_PATH:
+        SSL_CONTEXT = _ssl.create_default_context(cafile=CERTIFI_PATH)
+    else:
+        SSL_CONTEXT = _ssl.create_default_context()
+except Exception:
+    SSL_CONTEXT = None
+
+# Son ag hatasi / manifest hatasi (UI + /api/net-test icin)
+NET_LAST_ERROR = {}
+LAST_MANIFEST_ERROR = ""
+
+
+def log_error(msg):
+    """Hatalari HEM konsol gecmisine HEM stderr'e yazar.
+
+    macOS'ta paketlenmis uygulamada stdout kaybolabilir; stderr log dosyasina
+    ve terminale gider, boylece 'sessizce bos donen' hatalar gorunur olur.
+    """
+    line = f"⛔ {msg}"
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    add_log(line)
+
 
 # ==================== DIZIN YAPILANDIRMASI ====================
 APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".cookie_launcher")
@@ -73,7 +120,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 9
+API_VERSION = 10
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -654,9 +701,21 @@ class ModrinthFetcher:
                 data = resp.json()
                 if isinstance(data, dict) and isinstance(data.get("hits"), list):
                     return data
-            add_log(f"Modrinth arama yaniti beklenmedik (HTTP {resp.status_code}), bos liste donduruluyor.")
+            msg = f"Modrinth arama yaniti beklenmedik (HTTP {resp.status_code})"
+            add_log(f"{msg}, bos liste donduruluyor.")
+            return {"hits": [], "total_hits": 0, "limit": limit, "offset": offset, "error": msg}
         except Exception as e:
-            add_log(f"Modrinth arama uyarisi (sessizce gecildi): {e}")
+            # macOS'ta SSL/dogrulama hatalari burada olusur; sessizce bos
+            # donmek yerine hatayi kaydet, stderr'e yaz ve yanitta bildir.
+            set_net_error("modrinth_search", e)
+            log_error(
+                f"Modrinth aramasi basarisiz ({type(e).__name__}: {e}). "
+                f"certifi: {CERTIFI_PATH or 'YOK'} | platform: {sys.platform}"
+            )
+            return {
+                "hits": [], "total_hits": 0, "limit": limit, "offset": offset,
+                "error": f"Modrinth bağlantı hatası: {type(e).__name__}: {e}",
+            }
 
         return {"hits": [], "total_hits": 0, "limit": limit, "offset": offset}
 
@@ -1340,12 +1399,26 @@ def install_modpack_background(inst_id, pack_url):
 
 
 # ==================== MOJANG SURUMLER MANIFESTI ====================
+def set_net_error(where, exc):
+    """Son ag hatasini kaydeder (UI ve /api/net-test bunu gosterebilir)."""
+    global NET_LAST_ERROR
+    NET_LAST_ERROR = {
+        "where": where,
+        "error": f"{type(exc).__name__}: {exc}",
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    return NET_LAST_ERROR
+
+
 def get_complete_version_manifest():
     """Mojang manifestini ceker; ag hatasinda onbellek, olmazsa küratör listeye duser."""
+    global LAST_MANIFEST_ERROR
     try:
         url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
         req = urllib.request.Request(url, headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
+        # macOS'ta sistem kok sertifikalari bulunamazsa burasi patlar; certifi
+        # tabanli SSL_CONTEXT ile dogru CA demeti kullanilir.
+        with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as resp:
             data = json.loads(resp.read().decode())
             items = []
             for item in data.get("versions", []):
@@ -1362,9 +1435,15 @@ def get_complete_version_manifest():
                     json.dump(items, f, indent=2)
             except Exception:
                 pass
+            LAST_MANIFEST_ERROR = ""
             return items
     except Exception as e:
-        add_log(f"Mojang manifesti anlik cekilemedi, onbellege donuluyor: {e}")
+        LAST_MANIFEST_ERROR = f"{type(e).__name__}: {e}"
+        set_net_error("mojang_manifest", e)
+        log_error(
+            f"Mojang sürüm manifesti çekilemedi ({LAST_MANIFEST_ERROR}). "
+            f"Python: {sys.version.split()[0]} | certifi: {CERTIFI_PATH or 'YOK'} | platform: {sys.platform}"
+        )
 
     if os.path.exists(VERSIONS_CACHE_FILE):
         try:
@@ -1384,6 +1463,56 @@ def get_complete_version_manifest():
             "is_optimized": is_version_cookie_optimized(r),
         })
     return fallback
+
+
+def run_net_selftest():
+    """Dis API'lere gercek baglanti testi.
+
+    macOS'ta "listeler bos geliyor" sorununu tek istekte teshis etmek icin:
+    hem requests (certifi) hem urllib yolunu dener ve tam hata metnini doner.
+    """
+    targets = [
+        ("modrinth", "https://api.modrinth.com/v2/tag/game_version"),
+        ("mojang_piston", "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"),
+        ("mojang_launchermeta", "https://launchermeta.mojang.com/mc/game/version_manifest.json"),
+        ("fabric_meta", "https://meta.fabricmc.net/v2/versions/loader"),
+    ]
+    results = []
+    for name, url in targets:
+        t0 = time.time()
+        entry = {"name": name, "url": url}
+        try:
+            r = requests.get(url, timeout=8, headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
+            entry["ok"] = r.status_code == 200
+            entry["http"] = r.status_code
+        except Exception as e:
+            entry["ok"] = False
+            entry["error"] = f"{type(e).__name__}: {e}"
+        entry["ms"] = int((time.time() - t0) * 1000)
+        results.append(entry)
+
+    # Mojang manifesti urllib ile cekiliyor: onu da ayrica test et
+    urllib_entry = {"name": "urllib_piston", "url": targets[1][1]}
+    try:
+        req = urllib.request.Request(targets[1][1], headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
+        with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as resp:
+            urllib_entry["ok"] = getattr(resp, "status", 200) == 200
+            urllib_entry["http"] = getattr(resp, "status", 200)
+    except Exception as e:
+        urllib_entry["ok"] = False
+        urllib_entry["error"] = f"{type(e).__name__}: {e}"
+    results.append(urllib_entry)
+
+    return {
+        "success": True,
+        "platform": sys.platform,
+        "python": sys.version.split()[0],
+        "certifi": CERTIFI_PATH or None,
+        "ssl_source": "certifi" if CERTIFI_PATH else "system",
+        "last_error": NET_LAST_ERROR,
+        "manifest_error": LAST_MANIFEST_ERROR,
+        "results": results,
+    }
 
 
 # ==================== OYUN BASLATMA THREADI (NON-BLOCKING) ====================
@@ -1757,7 +1886,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "version": "2.0.0",
                     "api_version": API_VERSION,
                     "features": ["instances", "modpack", "instance_mods", "content_manage",
-                                 "content_icons", "loader_versions"],
+                                 "content_icons", "loader_versions", "net_test"],
                 })
                 return
 
@@ -1792,7 +1921,8 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 try:
                     versions = get_complete_version_manifest()
                 except Exception as e:
-                    add_log(f"Surum manifesti hatasi (sessizce gecildi): {e}")
+                    set_net_error("version_manifest", e)
+                    log_error(f"Sürüm manifesti hatası: {type(e).__name__}: {e}")
 
                 try:
                     installed = [
@@ -1810,7 +1940,18 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     except Exception:
                         pass
 
-                self.send_json({"success": True, "versions": versions, "installed": installed})
+                payload = {"success": True, "versions": versions, "installed": installed}
+                # Manifest canli cekilemediyse (onbellek/kuratör listeyle
+                # idare ediliyorsa) UI bunu kullaniciya soyleyebilsin.
+                if LAST_MANIFEST_ERROR:
+                    payload["error"] = f"Mojang sürüm listesi güncellenemedi: {LAST_MANIFEST_ERROR}"
+                    payload["cached"] = os.path.exists(VERSIONS_CACHE_FILE)
+                self.send_json(payload)
+                return
+
+            # 3b. Ag teshisi: dis API'lere gercek baglanti testi
+            if path == "/net-test":
+                self.send_json(run_net_selftest())
                 return
 
             # 4. Modrinth Arama API (ASLA 500 DONMEZ)

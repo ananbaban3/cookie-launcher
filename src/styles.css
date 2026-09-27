@@ -4042,3 +4042,19 @@ body {
 @media (max-height: 720px) {
   .version-modal-window { height: 86vh; }
 }
+
+/* Ag hatasi durumlari (macOS teshis gorunurlugu) */
+.np-net-error {
+  color: var(--accent-red);
+  font-weight: 700;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.np-net-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  word-break: break-all;
+  text-align: center;
+}
