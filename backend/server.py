@@ -73,7 +73,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 7
+API_VERSION = 9
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -1396,7 +1396,14 @@ def run_game_background_task(params):
 
     try:
         username = (params.get("username") or "Steve").strip() or "Steve"
-        raw_version = (params.get("version") or "1.20.4").strip()
+        # Profil secilmeden ve acik bir surum verilmeden baslatma YOK.
+        # Aksi hâlde global .minecraft klasorune rastgele bir surum indirilip
+        # oyun baslatiliyordu (kullanicinin "profil yokken 26.3 indirdi" hatasi).
+        if not str(params.get("instance_id") or "").strip() and not str(params.get("version") or "").strip():
+            raise RuntimeError(
+                "Profil seçilmedi. Başlatmak için önce bir profil oluşturun veya seçin."
+            )
+        raw_version = str(params.get("version") or "").strip()
         loader = (params.get("loader") or "fabric").lower()
         cookie_opt = params.get("cookie_optimized", True)
         ram_gb = int(params.get("ram", get_optimal_ram_allocation()))
@@ -1411,6 +1418,7 @@ def run_game_background_task(params):
         # Profil seciliyse surum/loader profil config'inden okunur; modlar profile kurulur.
         instance_id = params.get("instance_id")
         pack_launch_version = ""
+        loader_version = ""
         if instance_id:
             inst_cfg = load_instance_config(instance_id)
             if not inst_cfg:
@@ -1419,6 +1427,7 @@ def run_game_background_task(params):
             clean_v = clean_minecraft_version(inst_cfg.get("version") or clean_v)
             loader = (inst_cfg.get("loader") or loader).lower()
             pack_launch_version = str(inst_cfg.get("launch_version") or "").strip()
+            loader_version = str(inst_cfg.get("loader_version") or "").strip()
             if inst_cfg.get("install_status") == "installing":
                 raise RuntimeError("Bu profil hâlâ kuruluyor. Lütfen kurulum tamamlanana kadar bekleyin.")
             game_dir = os.path.join(INSTANCES_DIR, instance_id)
@@ -1473,46 +1482,49 @@ def run_game_background_task(params):
         )
         add_log(f"Seçilen Java Yürütücüsü: {java_exec}")
 
-        # 4. Yukleyici Kurulumu (Fabric / Forge) - modpack ise zaten kurulu
-        if not pack_launch_version and loader == "fabric":
+        # 4. Yukleyici Kurulumu (Fabric / Forge / NeoForge / Quilt) - modpack ise zaten kurulu
+        #    Birlesik mod_loader API'si kullanilir: profil icin kayitli loader surumu
+        #    varsa o, yoksa bu Minecraft surumu icin ONERILEN (stable) surum kurulur.
+        if not pack_launch_version and loader in ("fabric", "forge", "neoforge", "quilt"):
+            loader_label = LOADER_LABELS.get(loader, loader.capitalize())
             update_state(
-                status=f"Fabric Loader ({clean_v}) yapılandırılıyor...",
-                detail="Fabric kütüphaneleri kuruluyor...",
+                status=f"{loader_label} yükleyicisi ({clean_v}) hazırlanıyor...",
+                detail=f"{loader_label} kütüphaneleri kuruluyor...",
                 percent=72,
                 progress=0.72,
             )
             try:
-                minecraft_launcher_lib.fabric.install_fabric(
-                    clean_v, minecraft_directory, callback=make_progress_callbacks(70, 10), java=java_exec
-                )
-                installed_vers = [v["id"] for v in minecraft_launcher_lib.utils.get_installed_versions(minecraft_directory)]
-                fabric_candidates = [
-                    v for v in installed_vers if "fabric-loader" in v and v.endswith(f"-{clean_v}")
-                ]
-                if fabric_candidates:
-                    version_to_run = sorted(fabric_candidates)[-1]
-                    add_log(f"Fabric sürümü bağlandı: {version_to_run}")
-            except Exception as fe:
-                add_log(f"Fabric kurulum notu: {fe}. Vanilla ile devam edilebilir.")
-
-        elif not pack_launch_version and loader == "forge":
-            update_state(
-                status=f"Forge ({clean_v}) doğrulanıyor...",
-                detail="Forge kütüphaneleri taranıyor...",
-                percent=72,
-                progress=0.72,
-            )
-            try:
-                forge_v = minecraft_launcher_lib.forge.find_forge_version(clean_v)
-                if forge_v:
-                    minecraft_launcher_lib.forge.install_forge_version(
-                        forge_v, minecraft_directory, callback=make_progress_callbacks(70, 10), java=java_exec
-                    )
-                    version_to_run = forge_v
+                ml = minecraft_launcher_lib.mod_loader.get_mod_loader(loader)
+                # Yukleyicinin kabul ettigi MC surum adi (orn. NeoForge 26.3 -> 1.26.3)
+                loader_mc = resolve_loader_mc_version(ml, clean_v)
+                lv = loader_version
+                if not lv and loader_mc:
+                    try:
+                        lv = ml.get_latest_loader_version(loader_mc) or ""
+                    except Exception:
+                        lv = ""
+                if lv:
+                    add_log(f"{loader_label} {lv} kuruluyor (MC {clean_v})...")
                 else:
-                    add_log(f"Forge {clean_v} için uygun yükleyici bulunamadı, Vanilla ile devam ediliyor.")
-            except Exception as fge:
-                add_log(f"Forge kurulum notu: {fge}")
+                    add_log(f"{loader_label}: önerilen sürüm bulunamadı, kütüphane varsayılanı denenecek.")
+                installed_id = install_loader_version(
+                    ml,
+                    clean_v,
+                    minecraft_directory,
+                    lv,
+                    make_progress_callbacks(70, 10),
+                    java_exec,
+                )
+                if installed_id:
+                    version_to_run = installed_id
+                elif lv:
+                    fallback_id = ml.get_installed_version(clean_v, lv)
+                    if fallback_id:
+                        version_to_run = fallback_id
+                add_log(f"{loader_label} hazır: {version_to_run}")
+            except Exception as le:
+                add_log(f"{loader_label} kurulum uyarısı: {le}. Vanilla ile devam ediliyor.")
+                version_to_run = clean_v
 
         # 5. COOKIE LAUNCHER OZEL OPTIMIZE ENJEKTORU
         if cookie_opt:
@@ -1744,8 +1756,22 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "app": "CookieLauncher",
                     "version": "2.0.0",
                     "api_version": API_VERSION,
-                    "features": ["instances", "modpack", "instance_mods", "content_manage", "content_icons"],
+                    "features": ["instances", "modpack", "instance_mods", "content_manage",
+                                 "content_icons", "loader_versions"],
                 })
+                return
+
+            # 0b. Yukleyici (Loader) Surumleri: onerilen + tum surumler
+            if path == "/loaders/versions":
+                loader_id = (query.get("loader", ["fabric"])[0] or "fabric")
+                mc_version = (query.get("version", [""])[0] or "")
+                self.send_json(get_loader_version_info(loader_id, mc_version))
+                return
+
+            # 0c. Modpack surumleri (Yeni Profil > Mod Paketleri alt bari)
+            if path == "/modrinth/pack/versions":
+                slug = query.get("slug", [""])[0]
+                self.send_json(fetch_modpack_game_versions(slug))
                 return
 
             # 1. Durum Sorgusu
@@ -2207,6 +2233,10 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 name = (body.get("name") or "Yeni Profil").strip()
                 ver = (body.get("version") or "1.20.4").strip()
                 loader = (body.get("loader") or "fabric").lower()
+                # Opsiyonel: kullanicinin gelismis menuden sectigi loader surumu.
+                # Bos ise kurulum sirasinda Minecraft surumune uygun ONERILEN
+                # (stable) surum otomatik secilir.
+                loader_version = str(body.get("loader_version") or "").strip()
                 inst_id = re.sub(r"[^\w\-]", "_", name.lower()) or f"profil_{int(time.time())}"
                 inst_dir = get_instance_dir(inst_id)
                 if not inst_dir:
@@ -2218,6 +2248,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "name": name,
                     "version": ver,
                     "loader": loader,
+                    "loader_version": loader_version,
                     "icon": str(body.get("icon") or "").strip(),
                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
@@ -2299,6 +2330,203 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         self.send_json({"success": False, "error": "Bilinmeyen API yolu"}, 404)
+
+
+# ==================== YUKLEYICI (LOADER) SURUM COZUMLEME ====================
+# Yeni Profil ekrani icin: secilen Minecraft surumune uygun ONERILEN (stable)
+# loader surumu + gelismis secim icin tum surumler. Ag cagrisi tekrarlanmasin
+# diye 10 dakika onbelleklenir (LRU, ust sinirli).
+LOADER_LABELS = {
+    "vanilla": "Vanilla",
+    "fabric": "Fabric",
+    "forge": "Forge",
+    "neoforge": "NeoForge",
+    "quilt": "Quilt",
+}
+_LOADER_CACHE = OrderedDict()          # (loader, mc_version) -> (zaman, veri)
+_LOADER_CACHE_LOCK = threading.Lock()
+_LOADER_CACHE_TTL = 600.0
+_LOADER_CACHE_MAX = 120
+
+# Modpack -> destekledigi Minecraft surumleri / yukleyiciler (Yeni Profil alt bari)
+_PACK_VERSIONS_CACHE = OrderedDict()
+_PACK_VERSIONS_LOCK = threading.Lock()
+_PACK_VERSIONS_TTL = 900.0
+_PACK_VERSIONS_MAX = 60
+
+
+def fetch_modpack_game_versions(slug):
+    """Bir Modrinth modpack'inin destekledigi MC surumlerini ve yukleyicilerini dondurur."""
+    safe_slug = re.sub(r"[^a-zA-Z0-9\-_]", "", str(slug or ""))
+    if not safe_slug:
+        return {"success": False, "error": "Geçersiz paket.", "game_versions": [], "versions": []}
+
+    now = time.time()
+    with _PACK_VERSIONS_LOCK:
+        hit = _PACK_VERSIONS_CACHE.get(safe_slug)
+        if hit and (now - hit[0]) < _PACK_VERSIONS_TTL:
+            _PACK_VERSIONS_CACHE.move_to_end(safe_slug)
+            return hit[1]
+
+    try:
+        resp = requests.get(
+            f"{ModrinthFetcher.BASE_URL}/project/{safe_slug}/version",
+            headers=ModrinthFetcher.HEADERS,
+            timeout=10,
+        )
+        raw = resp.json() if resp.status_code == 200 else []
+        game_versions = []
+        items = []
+        if isinstance(raw, list):
+            for v in raw:
+                gvs = v.get("game_versions") or []
+                for g in gvs:
+                    if g not in game_versions:
+                        game_versions.append(g)
+                items.append({
+                    "name": v.get("name"),
+                    "version_number": v.get("version_number"),
+                    "game_versions": gvs,
+                    "loaders": [str(l).lower() for l in (v.get("loaders") or [])],
+                })
+        data = {
+            "success": True,
+            "slug": safe_slug,
+            "game_versions": game_versions,
+            "versions": items[:80],
+            "loaders": sorted({l for it in items for l in it["loaders"]}),
+        }
+    except Exception as e:
+        add_log(f"Modpack sürüm sorgusu hatası ({safe_slug}): {e}")
+        data = {"success": False, "error": str(e), "slug": safe_slug,
+                "game_versions": [], "versions": [], "loaders": []}
+
+    with _PACK_VERSIONS_LOCK:
+        _PACK_VERSIONS_CACHE[safe_slug] = (time.time(), data)
+        while len(_PACK_VERSIONS_CACHE) > _PACK_VERSIONS_MAX:
+            _PACK_VERSIONS_CACHE.popitem(last=False)
+    return data
+
+
+def resolve_loader_mc_version(ml, mc_version):
+    """Yukleyicinin kabul ettigi Minecraft surum adini dondurur.
+
+    Bazi yukleyiciler yeni Minecraft surumlerini farkli adlandirir:
+    manifestte "26.3" olan surum, NeoForge maven'inde "1.26.3" dalina karsilik
+    gelir (kutuphane de basina "1." ekleyerek normalize eder). Once gercek adi,
+    sonra "1." onekli/oneksiz varyantini dener. Bulunamazsa None doner.
+    """
+    candidates = [mc_version]
+    if re.match(r"^\d", mc_version) and not mc_version.startswith("1."):
+        candidates.append("1." + mc_version)        # 26.3 -> 1.26.3
+    elif mc_version.startswith("1.") and re.match(r"^1\.\d", mc_version):
+        candidates.append(mc_version[2:])           # 1.26.3 -> 26.3
+    for cand in candidates:
+        try:
+            if ml.is_minecraft_version_supported(cand):
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+def install_loader_version(ml, mc_version, minecraft_directory, loader_version, callback, java):
+    """Yukleyiciyi kurar ve baslatilacak surum kimligini dondurur.
+
+    Kutuphanenin public install() sarmalayicisi, Minecraft'in kendi ic adi
+    (orn. 26.3) ile yukleyicinin bekledigi ad (orn. 1.26.3) farkli oldugunda
+    UnsupportedVersion firlatir. Bu nedenle resmi akisin aynisini dogru MC
+    surum adiyla biz yuruturuz: vanilla kur -> yukleyiciyi kur -> yukleyici
+    surum jsonunu kur. _base bulunamazsa public API'ye geri donulur.
+    """
+    base = getattr(ml, "_base", None)
+    if base is None or not loader_version:
+        return ml.install(
+            mc_version, minecraft_directory,
+            loader_version=(loader_version or None), callback=callback, java=java,
+        )
+    minecraft_launcher_lib.install.install_minecraft_version(
+        mc_version, minecraft_directory, callback=callback
+    )
+    base.install(mc_version, str(minecraft_directory), callback, str(java), loader_version)
+    installed_id = ml.get_installed_version(mc_version, loader_version)
+    minecraft_launcher_lib.install.install_minecraft_version(
+        installed_id, minecraft_directory, callback=callback
+    )
+    return installed_id
+
+
+def get_loader_version_info(loader_id, mc_version):
+    """Bir Minecraft surumu icin onerilen ve tum yukleyici surumlerini dondurur."""
+    loader_id = (loader_id or "").lower().strip()
+    mc_version = (mc_version or "").strip()
+
+    if loader_id in ("", "vanilla", "none", "hicbiri", "hiçbiri"):
+        return {"success": True, "loader": "vanilla", "version": mc_version,
+                "supported": True, "recommended": None, "versions": [], "stable_only": []}
+    if loader_id not in LOADER_LABELS:
+        return {"success": False, "error": f"Desteklenmeyen yükleyici: {loader_id}"}
+    if not mc_version:
+        return {"success": False, "error": "Minecraft sürümü gerekli.", "loader": loader_id}
+
+    key = (loader_id, mc_version)
+    now = time.time()
+    with _LOADER_CACHE_LOCK:
+        hit = _LOADER_CACHE.get(key)
+        if hit and (now - hit[0]) < _LOADER_CACHE_TTL:
+            _LOADER_CACHE.move_to_end(key)
+            return hit[1]
+
+    try:
+        ml = minecraft_launcher_lib.mod_loader.get_mod_loader(loader_id)
+        # Yukleyicinin kabul ettigi ad (orn. NeoForge icin 26.3 -> 1.26.3)
+        loader_mc = resolve_loader_mc_version(ml, mc_version)
+        supported = bool(loader_mc)
+        mc_alias = loader_mc if (loader_mc and loader_mc != mc_version) else None
+
+        if not supported:
+            data = {"success": True, "loader": loader_id, "version": mc_version,
+                    "supported": False, "recommended": None, "versions": [], "stable_only": []}
+        else:
+            try:
+                recommended = ml.get_latest_loader_version(loader_mc)
+            except Exception:
+                recommended = None
+            try:
+                all_versions = list(ml.get_loader_versions(loader_mc, stable_only=False) or [])
+            except Exception:
+                all_versions = []
+            try:
+                stable_versions = list(ml.get_loader_versions(loader_mc, stable_only=True) or [])
+            except Exception:
+                stable_versions = []
+            data = {
+                "success": True,
+                "loader": loader_id,
+                "label": LOADER_LABELS.get(loader_id, loader_id),
+                "version": mc_version,
+                "supported": True,
+                "recommended": recommended,
+                # ONEMLI: Kesinlikle sinirlama yok. Kullanici gecmis ve guncel TUM
+                # loader surumlerini gorebilmeli (orn. Fabric icin 23 "stable"
+                # yerine 253 surumun tamami). Sirasi: en yeni -> en eski.
+                "stable_only": stable_versions,
+                "versions": all_versions,
+                "total_versions": len(all_versions),
+                "stable_count": len(stable_versions),
+                # Yukleyici bu MC surumunu farkli adlandiriyorsa (orn. 1.26.3)
+                "mc_alias": mc_alias,
+            }
+    except Exception as e:
+        add_log(f"Loader sürüm sorgusu hatası ({loader_id} {mc_version}): {e}")
+        data = {"success": False, "error": str(e), "loader": loader_id,
+                "version": mc_version, "recommended": None, "versions": [], "stable_only": []}
+
+    with _LOADER_CACHE_LOCK:
+        _LOADER_CACHE[key] = (time.time(), data)
+        while len(_LOADER_CACHE) > _LOADER_CACHE_MAX:
+            _LOADER_CACHE.popitem(last=False)
+    return data
 
 
 # ==================== SUNUCU (THREADED) ====================

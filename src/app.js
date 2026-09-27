@@ -8,7 +8,7 @@ let API_BASE = "http://127.0.0.1:18420";
 // ================== DURUMLAR ==================
 const state = {
   username: localStorage.getItem("cl_username") || "Steve",
-  selectedVersion: localStorage.getItem("cl_version") || "26.2",
+  selectedVersion: localStorage.getItem("cl_version") || "",
   loader: localStorage.getItem("cl_loader") || "fabric",
   cookieOptimize: localStorage.getItem("cl_optimize") !== "false",
   ram: parseInt(localStorage.getItem("cl_ram") || "4"),
@@ -158,7 +158,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 7) {
+        if (data && Number(data.api_version) >= 9) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -282,14 +282,9 @@ function setupEventListeners() {
     });
   }
 
-  document.querySelectorAll('input[name="instanceLoaderRadio"]').forEach(radio => {
-    radio.addEventListener("change", () => {
-      document.querySelectorAll('input[name="instanceLoaderRadio"]').forEach(r => {
-        const card = r.closest(".loader-card");
-        if (card) card.classList.toggle("active", r.checked);
-      });
-    });
-  });
+  // Yeni Profil modalı (sekmeli arayüz)
+  initNewProfileModal();
+  initRipple();
 
   // Modrinth Kurulum Hedefi
   const modrinthTargetSelect = document.getElementById("modrinthInstanceSelect");
@@ -582,17 +577,35 @@ function populateActiveInstanceSelect() {
   if (!select) return;
 
   select.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "Profil yok — Genel .minecraft kullanılır";
-  select.appendChild(none);
 
+  // Profilsiz oynama yolu YOK: "Genel .minecraft kullanılır" secenegi kaldirildi.
+  // Profil yoksa liste bos birakilmaz; secilemeyen bir bilgi satiri gosterilir.
+  if (state.instances.length === 0) {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Profil oluşturulmamış — önce yeni profil ekleyin";
+    none.disabled = true;
+    none.selected = true;
+    select.appendChild(none);
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
   state.instances.forEach(inst => {
     const opt = document.createElement("option");
     opt.value = inst.id;
     opt.textContent = `${inst.name} — MC ${inst.version} (${inst.loader})`;
     select.appendChild(opt);
   });
+
+  // Gecerli aktif profil yoksa ilk profili aktif kabul et; boylece hicbir
+  // durumda "profilsiz" baslatma kalmaz.
+  if (!state.instances.some(i => i.id === state.activeInstanceId)) {
+    state.activeInstanceId = state.instances[0].id;
+    localStorage.setItem("cl_instance", state.activeInstanceId);
+  }
+  select.value = state.activeInstanceId;
 }
 
 function renderInstances() {
@@ -652,9 +665,17 @@ function renderInstances() {
 
     const info = document.createElement("div");
     info.className = "inst-info";
+    const LOADER_ICONS = { fabric: "⚡", forge: "🔨", neoforge: "🦊", quilt: "🧵", vanilla: "🧱" };
+    const loaderKey = String(inst.loader || "vanilla").toLowerCase();
+    const showStatus = installing || failed;
     info.innerHTML = `
       <h4 class="inst-name" title="${escapeHtml(inst.name)}">${escapeHtml(inst.name)}</h4>
-      <span class="inst-meta">${metaText}</span>
+      <div class="inst-chips">
+        <span class="inst-chip">📦 ${escapeHtml(inst.version || "?")}</span>
+        <span class="inst-chip" title="Mod yükleyici">${LOADER_ICONS[loaderKey] || "📦"} ${escapeHtml(loaderKey)}</span>
+        <span class="inst-chip" title="Yüklü mod sayısı">🧩 ${inst.mod_count || 0}</span>
+      </div>
+      ${showStatus ? `<span class="inst-meta">${metaText}</span>` : ""}
     `;
     top.appendChild(info);
 
@@ -728,6 +749,12 @@ function applyActiveInstanceToUI() {
   const select = document.getElementById("activeInstanceSelect");
   const inst = getActiveInstance();
 
+  // Profil yoksa "OYUNU BASLAT" yerine "ONCE PROFIL OLUSTUR" gosterilir.
+  // Motor mesgulse (kurulum / oyun calisiyor) buton durumuna dokunulmaz.
+  if (!state.engineMode || state.engineMode === "idle") {
+    setLaunchButton(inst ? "idle" : "noProfile");
+  }
+
   if (select) select.value = inst ? inst.id : "";
 
   const vInput = document.getElementById("versionInput");
@@ -778,54 +805,428 @@ async function updateActiveInstance(fields) {
   }
 }
 
+// ==================== RIPPLE (mikro-etkileşim) ====================
+function initRipple() {
+  document.addEventListener("click", (e) => {
+    const btn = e.target && e.target.closest
+      ? e.target.closest("button.btn-primary-action, button.btn-secondary, button.btn-mega-launch, button.nav-tab, button.cat-pill, button.np-loader-card, button.np-combo-item, button.np-pack-item, button.np-side-tab, button.np-adv-toggle, button.control-btn, button.btn-search-go, button.btn-browse-version, button.btn-close-modal, button.installed-cat-tab")
+      : null;
+    if (!btn || btn.disabled) return;
+    const rect = btn.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const size = Math.max(rect.width, rect.height);
+    const ripple = document.createElement("span");
+    ripple.className = "np-ripple";
+    ripple.style.width = ripple.style.height = size + "px";
+    ripple.style.left = (e.clientX - rect.left - size / 2) + "px";
+    ripple.style.top = (e.clientY - rect.top - size / 2) + "px";
+    btn.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 620);
+  });
+}
+
+// ==================== YENİ PROFİL MODALI (SEKMELİ YENİ ARAYÜZ) ====================
+const NP_LOADERS = [
+  { id: "vanilla",  name: "Vanilla",  note: "Yükleyici kurulmaz; saf Minecraft deneyimi." },
+  { id: "neoforge", name: "NeoForge", note: "NeoForge yalnızca 1.20.2 ve üzeri sürümlerde yayınlanır." },
+  { id: "forge",    name: "Forge",    note: "Klasik modlar için en geniş uyumluluk." },
+  { id: "fabric",   name: "Fabric",   note: "Hafif ve yüksek performanslı yükleyici." },
+  { id: "quilt",    name: "Quilt",    note: "Fabric modlarıyla büyük ölçüde uyumludur." },
+];
+
+const npState = {
+  tab: "custom",
+  version: "",
+  versionType: "release",
+  versionOptimized: false,
+  loader: "fabric",
+  loaderInfo: null,
+  loaderLoading: false,
+  loaderError: "",
+  manualLoaderVersion: "",
+  packHits: [],
+  selectedPack: null,
+  packBusy: false,
+  packRequestId: 0,
+};
+
+function npText(el, value) {
+  if (el) el.textContent = value == null ? "" : String(value);
+}
+
+function npShow(el, show) {
+  if (el) el.style.display = show ? "" : "none";
+}
+
+function npFmtNum(n) {
+  const v = Number(n || 0);
+  if (v >= 1e9) return (v / 1e9).toFixed(1).replace(".", ",") + " Mr";
+  if (v >= 1e6) return (v / 1e6).toFixed(1).replace(".", ",") + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1).replace(".", ",") + "B";
+  return String(v);
+}
+
+function initNewProfileModal() {
+  document.querySelectorAll("[data-np-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => npSelectTab(btn.getAttribute("data-np-tab")));
+  });
+
+  const vInput = document.getElementById("instanceVersionInput");
+  if (vInput) {
+    vInput.addEventListener("focus", () => npRenderVersionList(vInput.value, true));
+    vInput.addEventListener("input", () => npRenderVersionList(vInput.value, true));
+    vInput.addEventListener("keydown", (e) => {
+      const list = document.getElementById("npVersionList");
+      const openList = !!(list && list.classList.contains("open"));
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (openList) {
+          const first = list.querySelector(".np-combo-item");
+          if (first) npPickVersion(first.getAttribute("data-version"));
+        } else {
+          confirmCreateInstance();
+        }
+      } else if (e.key === "Escape") {
+        npCloseVersionList();
+      } else if (e.key === "ArrowDown" && openList) {
+        const first = list.querySelector(".np-combo-item");
+        if (first) { e.preventDefault(); first.focus(); }
+      }
+    });
+  }
+
+  // Sürüm alanına tıklanınca ESKİ sürüm menüsü (tablo + filtreler) açılır
+  const picker = document.getElementById("npVersionPicker");
+  if (picker) picker.addEventListener("click", () => openVersionSelectorModal());
+
+  document.addEventListener("click", (e) => {
+    const combo = document.getElementById("npVersionCombo");
+    if (combo && !combo.contains(e.target)) npCloseVersionList();
+  });
+
+  document.querySelectorAll("#npLoaderGrid .np-loader-card").forEach((card) => {
+    card.addEventListener("click", () => npSelectLoader(card.getAttribute("data-loader")));
+  });
+
+  const advToggle = document.getElementById("npAdvToggle");
+  if (advToggle) {
+    advToggle.addEventListener("click", () => {
+      const panel = document.getElementById("npAdvPanel");
+      if (!panel) return;
+      const willOpen = panel.hasAttribute("hidden");
+      if (willOpen) panel.removeAttribute("hidden");
+      else panel.setAttribute("hidden", "");
+      advToggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      advToggle.classList.toggle("active", willOpen);
+    });
+  }
+
+  const lvSelect = document.getElementById("npLoaderVersionSelect");
+  if (lvSelect) {
+    lvSelect.addEventListener("change", () => {
+      npState.manualLoaderVersion = lvSelect.value || "";
+      npUpdateLoaderBox();
+    });
+  }
+
+  const packBtn = document.getElementById("npPackSearchBtn");
+  if (packBtn) packBtn.addEventListener("click", () => npSearchPacks());
+  const packInput = document.getElementById("npPackSearchInput");
+  if (packInput) packInput.addEventListener("keydown", (e) => { if (e.key === "Enter") npSearchPacks(); });
+  const sortSel = document.getElementById("npPackSortSelect");
+  if (sortSel) sortSel.addEventListener("change", () => npSearchPacks());
+  const loaderFilter = document.getElementById("npPackLoaderFilter");
+  if (loaderFilter) loaderFilter.addEventListener("change", () => npSearchPacks());
+  const versionFilter = document.getElementById("npPackVersionFilter");
+  if (versionFilter) versionFilter.addEventListener("change", () => npSearchPacks());
+  const installBtn = document.getElementById("npPackInstallBtn");
+  if (installBtn) installBtn.addEventListener("click", () => npInstallSelectedPack());
+}
+
+function npSelectTab(tab) {
+  npState.tab = tab === "packs" ? "packs" : "custom";
+  document.querySelectorAll("[data-np-tab]").forEach((b) => {
+    const active = b.getAttribute("data-np-tab") === npState.tab;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const custom = document.getElementById("npPaneCustom");
+  const packs = document.getElementById("npPanePacks");
+  if (custom) custom.classList.toggle("active", npState.tab === "custom");
+  if (packs) packs.classList.toggle("active", npState.tab === "packs");
+  const confirmBtn = document.getElementById("btnConfirmCreateInstance");
+  if (confirmBtn) confirmBtn.style.display = npState.tab === "custom" ? "" : "none";
+  const tip = document.getElementById("npModalTip");
+  if (tip) {
+    tip.textContent = npState.tab === "custom"
+      ? "💡 Profil oluşturulunca otomatik olarak aktif edilir."
+      : "💡 Mod paketi kendi Minecraft sürümü ve yükleyicisiyle ayrı bir profil olarak kurulur.";
+  }
+  if (npState.tab === "packs" && npState.packHits.length === 0 && !npState.packBusy) {
+    npRenderPackVersionFilter();
+    npSearchPacks();
+  }
+}
+
+// ---------- Minecraft sürümü: aranabilir açılır liste ----------
+function npRenderVersionList(query, open) {
+  const list = document.getElementById("npVersionList");
+  const input = document.getElementById("instanceVersionInput");
+  if (!list) return;
+  const q = String(query || "").trim().toLowerCase();
+  const all = Array.isArray(state.versions) ? state.versions : [];
+  let items = all.filter((v) => !q || String(v.id).toLowerCase().includes(q));
+  if (q) {
+    items = items.slice().sort((a, b) => {
+      const rank = (x) => {
+        const id = String(x.id).toLowerCase();
+        return id === q ? 0 : id.startsWith(q) ? 1 : 2;
+      };
+      return rank(a) - rank(b);
+    });
+  }
+  const shown = items.slice(0, 80);
+  list.innerHTML = "";
+  if (shown.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "np-combo-empty";
+    empty.textContent = all.length ? "Eşleşen sürüm yok." : "Sürüm listesi yükleniyor...";
+    list.appendChild(empty);
+  } else {
+    shown.forEach((v) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "np-combo-item" + (v.id === npState.version ? " selected" : "");
+      item.setAttribute("data-version", v.id);
+      item.setAttribute("role", "option");
+      item.innerHTML =
+        `<span class="np-combo-id">${v.is_optimized ? '<span class="np-combo-opt" aria-hidden="true">⚡</span>' : ""}${escapeHtml(v.id)}</span>` +
+        `<span class="np-combo-type">${escapeHtml(v.type || "")}</span>`;
+      item.addEventListener("click", () => npPickVersion(v.id, v));
+      item.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); npPickVersion(v.id, v); }
+      });
+      list.appendChild(item);
+    });
+    if (items.length > shown.length) {
+      const more = document.createElement("div");
+      more.className = "np-combo-more";
+      more.textContent = `+${items.length - shown.length} sürüm daha... (aramayı daraltın)`;
+      list.appendChild(more);
+    }
+  }
+  if (open) {
+    list.classList.add("open");
+    if (input) input.setAttribute("aria-expanded", "true");
+  }
+}
+
+function npCloseVersionList() {
+  const list = document.getElementById("npVersionList");
+  const input = document.getElementById("instanceVersionInput");
+  if (list) list.classList.remove("open");
+  if (input) input.setAttribute("aria-expanded", "false");
+}
+
+function npApplyVersion(version) {
+  npState.version = version;
+  const info = Array.isArray(state.versions) ? state.versions.find((v) => v.id === version) : null;
+  npState.versionType = info && info.type ? info.type : "release";
+  npState.versionOptimized = !!(info && info.is_optimized);
+  const input = document.getElementById("instanceVersionInput");
+  if (input) input.value = version;
+
+  // Buton icerigi: surum adi (yumusak fade ile) + tip rozeti + optimize rozeti
+  const vEl = document.getElementById("npVersionPickerValue");
+  if (vEl) {
+    vEl.textContent = version;
+    vEl.classList.remove("nvp-updated");
+    void vEl.offsetWidth;           // animasyonu yeniden tetikle
+    vEl.classList.add("nvp-updated");
+  }
+  const badge = document.getElementById("npVersionPickerBadge");
+  if (badge) {
+    badge.textContent = VERSION_TYPE_LABELS[npState.versionType] || npState.versionType || "Release";
+    badge.setAttribute("data-type", npState.versionType || "release");
+  }
+  npShow(document.getElementById("npVersionPickerOpt"), npState.versionOptimized);
+  npText(document.getElementById("npVersionHint"), "Seçildi: " + version);
+}
+
+function npPickVersion(version, meta) {
+  if (!version) return;
+  npApplyVersion(version);
+  npCloseVersionList();
+  npFetchLoaderInfo();
+}
+
+// ---------- Mod yükleyici seçimi + otomatik sürüm ataması ----------
+function npSelectLoader(loader) {
+  npState.loader = loader || "fabric";
+  npState.manualLoaderVersion = "";
+  npState.loaderInfo = null;
+  npState.loaderError = "";
+  document.querySelectorAll("#npLoaderGrid .np-loader-card").forEach((c) => {
+    c.classList.toggle("active", c.getAttribute("data-loader") === npState.loader);
+  });
+  const sel = document.getElementById("npLoaderVersionSelect");
+  if (sel) sel.innerHTML = '<option value="">Otomatik (önerilen)</option>';
+  const meta = NP_LOADERS.find((l) => l.id === npState.loader);
+  npText(document.getElementById("npLoaderNote"), meta ? meta.note : "");
+  npFetchLoaderInfo();
+}
+
+async function npFetchLoaderInfo() {
+  if (!npState.version) return;
+  if (npState.loader === "vanilla") {
+    npState.loaderInfo = null;
+    npState.loaderLoading = false;
+    npState.loaderError = "";
+    npUpdateLoaderBox();
+    return;
+  }
+  npState.loaderLoading = true;
+  npState.loaderError = "";
+  npUpdateLoaderBox();
+  const reqId = ++npState.packRequestId;
+  const data = await apiGet(
+    `/api/loaders/versions?loader=${encodeURIComponent(npState.loader)}&version=${encodeURIComponent(npState.version)}`,
+    25000
+  );
+  if (reqId !== npState.packRequestId) return;
+  npState.loaderLoading = false;
+  if (!data || !data.success) {
+    npState.loaderInfo = null;
+    npState.loaderError = (data && data.error) || "Yükleyici sürüm bilgisi alınamadı.";
+  } else {
+    npState.loaderInfo = data;
+  }
+  const sel = document.getElementById("npLoaderVersionSelect");
+  if (sel) {
+    sel.innerHTML = '<option value="">Otomatik (önerilen)</option>';
+    const info = npState.loaderInfo;
+    // TAM liste kullanilir (stable_only degil): kullanici gecmis surumlerin
+    // tamamini gorebilmeli. Kararli surumler isaretlenir.
+    const all = (info && info.versions) || [];
+    const stableSet = new Set((info && info.stable_only) || []);
+    all.forEach((v) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = stableSet.has(v) ? `${v}   • kararlı` : v;
+      sel.appendChild(o);
+    });
+    sel.value = all.indexOf(npState.manualLoaderVersion) !== -1 ? npState.manualLoaderVersion : "";
+  }
+  npUpdateLoaderBox();
+}
+
+function npUpdateLoaderBox() {
+  const valueEl = document.getElementById("npLoaderRecommended");
+  const reasonEl = document.getElementById("npLoaderReason");
+  const hintEl = document.getElementById("npLoaderVersionHint");
+  if (!valueEl) return;
+
+  if (npState.loader === "vanilla") {
+    valueEl.innerHTML = '<span class="np-lv-none">Yükleyici yok</span>';
+    npText(reasonEl, "Vanilla profilde mod yükleyici kurulmaz.");
+    if (hintEl) hintEl.textContent = "Vanilla seçiliyken loader sürümü gerekmez.";
+    return;
+  }
+  if (npState.loaderLoading) {
+    valueEl.innerHTML = '<span class="np-lv-spinner" aria-hidden="true"></span> hesaplanıyor...';
+    npText(reasonEl, `${npState.version} için ${npState.loader} sürümleri sorgulanıyor...`);
+    return;
+  }
+  if (npState.loaderError) {
+    valueEl.innerHTML = '<span class="np-lv-error">alınamadı</span>';
+    npText(reasonEl, npState.loaderError);
+    return;
+  }
+  const info = npState.loaderInfo;
+  if (!info || info.supported === false) {
+    valueEl.innerHTML = '<span class="np-lv-warn">desteklenmiyor</span>';
+    npText(reasonEl, `${npState.loader} ${npState.version} sürümü için yayınlanmıyor. Farklı bir sürüm ya da yükleyici seçin.`);
+    return;
+  }
+  const rec = info.recommended || "";
+  // Durust bilgilendirme: yukleyici bu MC surumunu farkli adlandirabilir ve
+  // bazi yeni surumler icin henuz kararli yapi olmayabilir.
+  const aliasNote = info.mc_alias ? ` Yükleyici bu sürümü "${info.mc_alias}" olarak adlandırır.` : "";
+  const betaNote = /beta|alpha|rc/i.test(rec) ? " ⚠️ Bu Minecraft sürümü için kararlı yapı yok, en yeni ön sürüm öneriliyor." : "";
+  if (npState.manualLoaderVersion) {
+    valueEl.innerHTML = `<span class="np-lv-manual">${escapeHtml(npState.manualLoaderVersion)}</span> <span class="np-lv-tag">elle seçildi</span>`;
+    npText(reasonEl, `Otomatik öneri: ${rec || "—"} • Gelişmiş menüden değiştirildi.`);
+  } else {
+    valueEl.innerHTML = `<span class="np-lv-ok">${escapeHtml(rec || "—")}</span> <span class="np-lv-tag">otomatik</span>`;
+    npText(reasonEl, (rec
+      ? `${npState.version} + ${npState.loader} için önerilen sürüm otomatik atandı.`
+      : "Önerilen sürüm bulunamadı, kütüphane varsayılanı kullanılacak.") + aliasNote + betaNote);
+  }
+  if (hintEl) hintEl.textContent = info.total_versions
+    ? `${info.total_versions} sürümün tamamı listelendi${info.stable_count ? ` (${info.stable_count} tanesi kararlı olarak işaretli)` : ""}.`
+    : "";
+}
+
+// ---------- Modal aç / kapa ----------
 function openCreateInstanceModal() {
   const modal = document.getElementById("createInstanceModal");
   if (!modal) return;
-
   const nameInput = document.getElementById("instanceNameInput");
-  const versionInput = document.getElementById("instanceVersionInput");
   const iconInput = document.getElementById("instanceIconInput");
-  const active = getActiveInstance();
-
   if (nameInput) nameInput.value = "";
   if (iconInput) iconInput.value = "";
-  if (versionInput) versionInput.value = (active && active.version) || state.selectedVersion || "1.20.4";
 
-  const defaultLoader = (active && active.loader) ||
-    (["fabric", "forge", "vanilla"].includes(state.loader) ? state.loader : "fabric");
-
-  document.querySelectorAll('input[name="instanceLoaderRadio"]').forEach(r => {
-    r.checked = (r.value === defaultLoader);
-    const card = r.closest(".loader-card");
-    if (card) card.classList.toggle("active", r.checked);
-  });
+  const fallbackVersion = npState.version || state.selectedVersion || (state.versions[0] && state.versions[0].id) || "1.20.4";
+  npApplyVersion(fallbackVersion);
+  npState.manualLoaderVersion = "";
+  npSelectLoader(npState.loader || "fabric");
+  npSelectTab("custom");
+  npRenderPackVersionFilter();
 
   modal.style.display = "flex";
-  if (nameInput) setTimeout(() => nameInput.focus(), 60);
+  if (nameInput) setTimeout(() => nameInput.focus(), 140);
 }
 
 function closeCreateInstanceModal() {
   const modal = document.getElementById("createInstanceModal");
   if (modal) modal.style.display = "none";
+  npCloseVersionList();
 }
 
 async function confirmCreateInstance() {
   const nameInput = document.getElementById("instanceNameInput");
-  const versionInput = document.getElementById("instanceVersionInput");
   const iconInput = document.getElementById("instanceIconInput");
-  const name = (nameInput && nameInput.value || "").trim();
-  const version = (versionInput && versionInput.value || "").trim() || state.selectedVersion || "1.20.4";
-  const icon = (iconInput && iconInput.value || "").trim();
-  const loaderRadio = document.querySelector('input[name="instanceLoaderRadio"]:checked');
-  const loader = loaderRadio ? loaderRadio.value : "fabric";
+  const name = ((nameInput && nameInput.value) || "").trim();
+  const icon = ((iconInput && iconInput.value) || "").trim();
+  const version = npState.version || state.selectedVersion || "1.20.4";
+  const loader = npState.loader || "fabric";
+  const loaderVersion = npState.manualLoaderVersion || "";
 
   if (!name) {
     showToast("Lütfen bir profil adı girin.", "info");
     if (nameInput) nameInput.focus();
     return;
   }
+  if (npState.loaderLoading) {
+    showToast("Yükleyici sürümü hâlâ hesaplanıyor, bir saniye...", "info");
+    return;
+  }
+  const info = npState.loaderInfo;
+  if (loader !== "vanilla" && info && info.supported === false) {
+    showToast(`⚠️ ${loader} ${version} için desteklenmiyor. Farklı sürüm/yükleyici seçin.`, "error");
+    return;
+  }
 
-  const data = await apiPost("/api/instances/create", { name, version, loader, icon }, 10000);
+  const confirmBtn = document.getElementById("btnConfirmCreateInstance");
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = "Oluşturuluyor..."; }
+
+  const data = await apiPost(
+    "/api/instances/create",
+    { name, version, loader, loader_version: loaderVersion, icon },
+    15000
+  );
+
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = "Oluştur ve Aktif Yap"; }
 
   if (data && data.success && data.instance) {
     closeCreateInstanceModal();
@@ -833,10 +1234,185 @@ async function confirmCreateInstance() {
     localStorage.setItem("cl_modrinth_target", data.instance.id);
     await loadInstances();
     setActiveInstance(data.instance.id);
-    showToast(`✓ "${data.instance.name}" profili oluşturuldu ve aktif edildi.`, "success");
+    const lvText = loader === "vanilla" ? "" : (loaderVersion ? ` • ${loaderVersion}` : " • oto loader");
+    showToast(`✓ "${data.instance.name}" oluşturuldu (${loader}${lvText}).`, "success");
     fetchModrinth(true);
   } else {
     showToast(`⚠️ ${(data && data.error) || "Profil oluşturulamadı."}`, "error");
+  }
+}
+
+// ==================== SEKME 2: MOD PAKETLERİ (yalnızca Modrinth) ====================
+function npRenderPackVersionFilter() {
+  const sel = document.getElementById("npPackVersionFilter");
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Tüm sürümler</option>';
+  const all = Array.isArray(state.versions) ? state.versions : [];
+  all.slice(0, 120).forEach((v) => {
+    const o = document.createElement("option");
+    o.value = v.id;
+    o.textContent = v.id;
+    sel.appendChild(o);
+  });
+  if (current) sel.value = current;
+}
+
+async function npSearchPacks() {
+  if (npState.packBusy) return;
+  npState.packBusy = true;
+  const list = document.getElementById("npPackList");
+  if (list) {
+    list.innerHTML = '<div class="np-pack-loading"><span class="np-spinner"></span><span>Mod paketleri taranıyor...</span></div>';
+  }
+  const searchEl = document.getElementById("npPackSearchInput");
+  const versionEl = document.getElementById("npPackVersionFilter");
+  const loaderEl = document.getElementById("npPackLoaderFilter");
+  const sortEl = document.getElementById("npPackSortSelect");
+  const params = new URLSearchParams({
+    q: (searchEl && searchEl.value) || "",
+    type: "modpack",
+    version: (versionEl && versionEl.value) || "",
+    loader: (loaderEl && loaderEl.value) || "",
+    sort: (sortEl && sortEl.value) || "relevance",
+    limit: 20,
+    offset: 0,
+  });
+  const data = await apiGet(`/api/modrinth/search?${params.toString()}`, 20000);
+  npState.packBusy = false;
+  npState.packHits = data && Array.isArray(data.hits) ? data.hits : [];
+  npRenderPackList();
+  if (npState.packHits.length > 0) npSelectPack(npState.packHits[0]);
+  else npRenderPackDetail(null);
+}
+
+function npRenderPackList() {
+  const list = document.getElementById("npPackList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (npState.packHits.length === 0) {
+    list.innerHTML = '<div class="np-pack-loading"><span>Sonuç bulunamadı.</span></div>';
+    return;
+  }
+  npState.packHits.forEach((hit, i) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "np-pack-item" + (npState.selectedPack && npState.selectedPack.slug === hit.slug ? " active" : "");
+    item.style.animationDelay = Math.min(i * 35, 420) + "ms";
+    item.innerHTML = `
+      <img class="np-pack-icon" src="${escapeHtml(hit.icon_url || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <span class="np-pack-text">
+        <strong>${escapeHtml(hit.title || hit.slug)}</strong>
+        <small>${escapeHtml(hit.description || "")}</small>
+        <span class="np-pack-meta">↓ ${npFmtNum(hit.downloads)}${hit.categories && hit.categories.length ? " • " + escapeHtml(hit.categories.slice(0, 3).join(", ")) : ""}</span>
+      </span>
+      <span class="np-pack-arrow" aria-hidden="true">→</span>`;
+    item.addEventListener("click", () => npSelectPack(hit));
+    list.appendChild(item);
+  });
+}
+
+function npRenderPackDetail(hit) {
+  const box = document.getElementById("npPackDetail");
+  if (!box) return;
+  if (!hit) {
+    box.innerHTML = `
+      <div class="np-pack-empty">
+        <span class="np-pack-empty-icon" aria-hidden="true">📦</span>
+        <span>Detayları görmek için soldan bir mod paketi seçin.</span>
+      </div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="np-pack-det-head">
+      <img class="np-pack-det-icon" src="${escapeHtml(hit.icon_url || "")}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="np-pack-det-title">
+        <h4>${escapeHtml(hit.title || hit.slug)}</h4>
+        <p class="np-pack-det-author">${escapeHtml(hit.author || "Modrinth")}</p>
+        <div class="np-pack-det-badges">
+          <span class="np-chip">↓ ${npFmtNum(hit.downloads)}</span>
+          <span class="np-chip">♥ ${npFmtNum(hit.follows)}</span>
+          <span class="np-chip" id="npPackDetLoaders">—</span>
+        </div>
+      </div>
+    </div>
+    <p class="np-pack-det-desc">${escapeHtml(hit.description || "")}</p>
+    <div class="np-pack-det-cats">
+      ${(hit.categories || []).map((c) => `<span class="np-chip">${escapeHtml(c)}</span>`).join("")}
+    </div>
+    <div class="np-pack-det-hint">
+      Bu paket kendi Minecraft sürümü ve yükleyicisiyle <strong>yeni bir profil</strong> olarak kurulur.
+    </div>`;
+}
+
+async function npSelectPack(hit) {
+  npState.selectedPack = hit;
+  npState.selectedPackVersion = "";
+  const items = document.querySelectorAll("#npPackList .np-pack-item");
+  npState.packHits.forEach((h, i) => {
+    if (items[i]) items[i].classList.toggle("active", h.slug === hit.slug);
+  });
+  npRenderPackDetail(hit);
+
+  const gvSel = document.getElementById("npPackGameVersionSelect");
+  const installBtn = document.getElementById("npPackInstallBtn");
+  if (gvSel) gvSel.innerHTML = '<option value="">yükleniyor...</option>';
+  if (installBtn) installBtn.disabled = true;
+
+  const data = await apiGet(`/api/modrinth/pack/versions?slug=${encodeURIComponent(hit.slug)}`, 20000);
+  if (!npState.selectedPack || npState.selectedPack.slug !== hit.slug) return;
+
+  const gameVersions = (data && data.game_versions) || [];
+  const loaders = (data && data.loaders) || [];
+  const target = getModrinthTarget();
+  const preferred = (target && target.version) || state.selectedVersion || "";
+
+  npText(document.getElementById("npPackDetLoaders"), loaders.length ? loaders.join(" • ") : "—");
+
+  if (gvSel) {
+    gvSel.innerHTML = "";
+    if (gameVersions.length === 0) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "sürüm bilgisi yok";
+      gvSel.appendChild(o);
+    } else {
+      gameVersions.forEach((g) => {
+        const o = document.createElement("option");
+        o.value = g;
+        o.textContent = g;
+        gvSel.appendChild(o);
+      });
+      if (preferred && gameVersions.indexOf(preferred) !== -1) gvSel.value = preferred;
+    }
+  }
+  if (installBtn) installBtn.disabled = false;
+}
+
+async function npInstallSelectedPack() {
+  const hit = npState.selectedPack;
+  if (!hit) return;
+  const gvSel = document.getElementById("npPackGameVersionSelect");
+  const gameVersion = (gvSel && gvSel.value) || "";
+  const btn = document.getElementById("npPackInstallBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "📦 Profil oluşturuluyor..."; }
+  showToast(`📦 ${hit.title || hit.slug} yeni profil olarak ekleniyor...`, "info");
+
+  const data = await apiPost("/api/modrinth/modpack/install", {
+    slug: hit.slug,
+    game_version: gameVersion,
+  }, 60000);
+
+  if (btn) { btn.disabled = false; btn.textContent = "📦 Profil Olarak Kur"; }
+
+  if (data && data.success && data.instance) {
+    closeCreateInstanceModal();
+    await loadInstances();
+    ensurePackPolling();
+    switchTab("tab-instances");
+    showToast(`✓ "${data.instance.name}" profili oluşturuldu, kurulum arka planda sürüyor.`, "success");
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Modpack profili oluşturulamadı."}`, "error");
   }
 }
 
@@ -877,7 +1453,7 @@ function renderModrinthTargetBar() {
   if (state.instances.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "Profil yok — önce profil oluşturun";
+    opt.textContent = "Profil oluşturulmamış — önce yeni profil ekleyin";
     select.appendChild(opt);
     select.disabled = true;
     if (loaderSelect) loaderSelect.disabled = false;
@@ -953,24 +1529,52 @@ function selectVersion(vid) {
   state.selectedVersion = vid;
   localStorage.setItem("cl_version", vid);
 
-  const vInput = document.getElementById("versionInput");
-  if (vInput) vInput.value = vid;
-
-  if (state.activeInstanceId) {
-    updateActiveInstance({ version: vid });
-  }
-
+  // Seçim artık YENİ PROFİL oluşturma ekranını besler: sürüm atanır,
+  // önerilen loader sürümü yenilenir ve kullanıcı alttan loader seçer.
+  npApplyVersion(vid);
+  npFetchLoaderInfo();
   closeVersionSelectorModal();
-  showToast(`Sürüm seçildi: ${vid}`, "info");
+
+  const ci = document.getElementById("createInstanceModal");
+  if (ci && ci.style.display !== "none") {
+    showToast(`Sürüm: ${vid} — şimdi mod yükleyicisini seçin`, "info");
+  } else {
+    showToast(`Sürüm seçildi: ${vid}`, "info");
+  }
 }
 
+function formatVersionDate(rt) {
+  if (!rt) return "—";
+  const d = new Date(rt);
+  if (isNaN(d.getTime())) return "—";
+  try {
+    return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
+  } catch (_) {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+const VERSION_TYPE_LABELS = {
+  release: "Release",
+  snapshot: "Snapshot",
+  beta: "Beta",
+  alpha: "Alpha",
+  experimental: "Deneysel"
+};
+
 function filterAndRenderVersionTable() {
-  const tbody = document.getElementById("versionTableListBody");
+  const list = document.getElementById("versionCardList");
   const noResults = document.getElementById("versionNoResults");
   const countText = document.getElementById("versionFilteredCountText");
-  if (!tbody) return;
+  if (!list) return;
 
-  tbody.innerHTML = "";
+  list.innerHTML = "";
+
+  // Filtre pill'lerinin secili gorunumunu state ile senkronla
+  document.querySelectorAll(".version-filter-cb").forEach((cb) => {
+    const pill = cb.closest(".vpill");
+    if (pill) pill.classList.toggle("on", cb.checked);
+  });
   const query = (state.versionSearchQuery || "").toLowerCase().trim();
 
   const filtered = state.versions.filter(v => {
@@ -991,42 +1595,27 @@ function filterAndRenderVersionTable() {
   }
   if (noResults) noResults.style.display = "none";
 
-  const typeLabels = {
-    release: "Sürüm",
-    snapshot: "Snapshot",
-    beta: "Beta",
-    alpha: "Alpha",
-    experimental: "Deneysel"
-  };
-
   filtered.forEach(v => {
-    const tr = document.createElement("tr");
-    if (v.id === state.selectedVersion) tr.classList.add("active-row");
-
-    const tdName = document.createElement("td");
-    tdName.className = "v-cell-name";
-    tdName.innerHTML = `
-      <span>${escapeHtml(v.id)}</span>
-      ${v.is_optimized ? '<span class="badge-opt-pill" title="Cookie Launcher Performans Profili Hazır">⚡ OPTİMİZE</span>' : ""}
-      ${v.id === state.selectedVersion ? '<span class="v-star">★</span>' : ""}
-    `;
-
-    const tdType = document.createElement("td");
-    tdType.innerHTML = `<span class="badge-vtype ${escapeHtml(v.type)}">${typeLabels[v.type] || escapeHtml(v.type)}</span>`;
-
-    const tdStatus = document.createElement("td");
-    tdStatus.style.textAlign = "right";
-    if (v.is_installed) {
-      tdStatus.innerHTML = `<span class="badge-status installed">✓ Yüklü</span>`;
-    } else {
-      tdStatus.innerHTML = `<span class="badge-status ready">İndirilebilir</span>`;
-    }
-
-    tr.appendChild(tdName);
-    tr.appendChild(tdType);
-    tr.appendChild(tdStatus);
-    tr.addEventListener("click", () => selectVersion(v.id));
-    tbody.appendChild(tr);
+    const isSelected = v.id === (npState.version || state.selectedVersion);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "vcard" + (isSelected ? " selected" : "");
+    card.setAttribute("role", "option");
+    card.setAttribute("aria-selected", isSelected ? "true" : "false");
+    card.innerHTML = `
+      <span class="vcard-accent" aria-hidden="true"></span>
+      <span class="vcard-main">
+        <span class="vcard-name">${escapeHtml(v.id)}</span>
+        ${v.is_optimized ? '<span class="vcard-badge badge-opt" title="Cookie Launcher optimize profili hazır">⚡ Optimize</span>' : ""}
+        <span class="vcard-badge badge-${escapeHtml(v.type)}">${VERSION_TYPE_LABELS[v.type] || escapeHtml(v.type)}</span>
+        ${isSelected ? '<span class="vcard-badge badge-current">✓ Seçili</span>' : ""}
+      </span>
+      <span class="vcard-side">
+        ${v.is_installed ? '<span class="vcard-installed">✓ Yüklü</span>' : ""}
+        <span class="vcard-date">${formatVersionDate(v.releaseTime)}</span>
+      </span>`;
+    card.addEventListener("click", () => selectVersion(v.id));
+    list.appendChild(card);
   });
 }
 
@@ -1039,11 +1628,13 @@ function setLaunchButton(mode) {
       idle: "OYUNU BAŞLAT",
       busy: "BAŞLATILIYOR...",
       installing: "YÜKLENİYOR...",
-      running: "🎮 OYUN ÇALIŞIYOR"
+      running: "🎮 OYUN ÇALIŞIYOR",
+      noProfile: "ÖNCE PROFİL OLUŞTUR"
     };
     btnText.textContent = labels[mode] || labels.idle;
   }
-  if (btnLaunch) btnLaunch.disabled = (mode !== "idle");
+  // noProfile modunda buton tiklanabilir kalir: tiklayinca profil olusturma acilir
+  if (btnLaunch) btnLaunch.disabled = (mode !== "idle" && mode !== "noProfile");
 }
 
 function openProgressModal() {
@@ -1095,7 +1686,7 @@ function setProgressTexts(status, detail, mb) {
   if (detailMsg) detailMsg.textContent = detail || "";
   if (mbText) {
     const mbValue = Number(mb);
-    mbText.textContent = `⬇ ${(Number.isFinite(mbValue) ? mbValue : 0).toFixed(1)} MB`;
+    mbText.textContent = `↓ ${(Number.isFinite(mbValue) ? mbValue : 0).toFixed(1)} MB`;
   }
 }
 
@@ -1106,7 +1697,17 @@ async function handleLaunchGame() {
   if (btnLaunch && btnLaunch.disabled) return;
 
   const activeInst = getActiveInstance();
-  const versionToLaunch = activeInst ? activeInst.version : ((state.selectedVersion || "").trim() || "1.20.4");
+
+  // Profil yoksa hicbir surum indirilmez / oyun baslatilmaz. Kullanici once
+  // profil olusturur (surum + yukleyici profile baglidir).
+  if (!activeInst) {
+    showToast("Başlatmak için önce bir profil oluşturun veya seçin.", "info");
+    switchTab("tab-instances");
+    setTimeout(() => openCreateInstanceModal(), 220);
+    return;
+  }
+
+  const versionToLaunch = activeInst.version;
 
   state.launchRequested = true;
   state.progressDismissed = false;
@@ -1125,12 +1726,12 @@ async function handleLaunchGame() {
   const payload = {
     username: state.username,
     version: versionToLaunch,
-    loader: activeInst ? activeInst.loader : state.loader,
+    loader: activeInst.loader,
     cookie_optimized: state.cookieOptimize,
     ram: state.ram,
     jvm_preset: "aikar"
   };
-  if (activeInst) payload.instance_id = activeInst.id;
+  payload.instance_id = activeInst.id;
 
   let accepted = false;
   let backendError = null;
@@ -1160,6 +1761,7 @@ async function handleLaunchGame() {
   // İstek kabul edilmedi: modalı kapat, butonu eski haline getir, tek seferlik bilgi ver
   state.launchRequested = false;
   closeProgressModal();
+  state.engineMode = "idle";
   setLaunchButton("idle");
   showErrorOnce(backendError || "Core servisine ulaşılamadı. Arka plan servisini yeniden başlatın.");
 }
@@ -1229,6 +1831,7 @@ function updateProgressUI(data) {
     ensureProgressModal();
     setProgressBar(data.percent || 2);
     setProgressTexts(data.status || "Hazırlanıyor...", data.detail || "", data.downloaded_mb);
+    state.engineMode = "installing";
     setLaunchButton("installing");
     return;
   }
@@ -1242,6 +1845,7 @@ function updateProgressUI(data) {
       scheduleCloseProgressModal(1200);
     }
     state.launchRequested = false;
+    state.engineMode = "running";
     setLaunchButton("running");
     return;
   }
@@ -1256,6 +1860,7 @@ function updateProgressUI(data) {
     closeProgressModal();
     apiPost("/api/clear-error", {}, 5000);
   }
+  state.engineMode = "idle";
   setLaunchButton("idle");
 }
 
@@ -1562,7 +2167,7 @@ function buildModCard(hit, index) {
     <h4 class="mod-title" title="${escapeHtml(hit.title)}">${escapeHtml(hit.title)}</h4>
     <p class="mod-desc">${escapeHtml(hit.description || "Açıklama bulunmuyor.")}</p>
     <div class="mod-bottom-row">
-      <span style="font-size: 11px; color: var(--text-muted);">⬇ ${(hit.downloads || 0).toLocaleString()}</span>
+      <span style="font-size: 11px; color: var(--text-muted);">↓ ${(hit.downloads || 0).toLocaleString()}</span>
       ${installed ? '<span class="mod-installed-chip">✓ Bu profilde yüklü</span>' : ""}
       ${!installed && target ? `<span class="mod-target-chip" title="Kurulum hedefi: ${escapeHtml(target.name)}">📥 ${escapeHtml(target.name)}</span>` : ""}
       <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : category}">${buttonLabel}</button>

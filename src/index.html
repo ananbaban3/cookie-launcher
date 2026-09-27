@@ -109,63 +109,6 @@
               </div>
             </div>
 
-            <!-- 2. Sürüm Seçim Alanı (Klavyeden Doğrudan Giriş + Sürüm Seç Butonu) -->
-            <div class="form-group">
-              <div class="label-row">
-                <label for="versionInput">Minecraft Sürümü</label>
-                <span class="label-hint" id="versionLabelHint">İstediğiniz sürümü doğrudan yazabilir veya listeden seçebilirsiniz</span>
-              </div>
-              <div class="version-input-row">
-                <div class="input-with-icon flex-1">
-                  <span class="input-icon">📦</span>
-                  <input type="text" id="versionInput" class="styled-input" placeholder="Sürüm yazın... (örn: 1.20.1, 1.8.9, 26.2)" list="versionsDatalist" autocomplete="off" spellcheck="false">
-                  <datalist id="versionsDatalist"></datalist>
-                </div>
-                <button type="button" class="btn-browse-version" id="btnOpenVersionModal">
-                  <span>📋 Sürümleri Filtrele & Seç</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- 3. Mod Yükleyici (Loader) Kartları -->
-            <div class="form-group">
-              <label>Mod Yükleyici Motoru</label>
-              <div class="loader-cards-grid">
-                <label class="loader-card active">
-                  <input type="radio" name="loaderRadio" value="fabric" checked>
-                  <div class="l-card-inner">
-                    <span class="l-icon">⚡</span>
-                    <div class="l-info">
-                      <span class="l-title">Fabric</span>
-                      <span class="l-desc">Yüksek Performans (Önerilen)</span>
-                    </div>
-                  </div>
-                </label>
-
-                <label class="loader-card">
-                  <input type="radio" name="loaderRadio" value="forge">
-                  <div class="l-card-inner">
-                    <span class="l-icon">🔨</span>
-                    <div class="l-info">
-                      <span class="l-title">Forge</span>
-                      <span class="l-desc">Geleneksel Modlar</span>
-                    </div>
-                  </div>
-                </label>
-
-                <label class="loader-card">
-                  <input type="radio" name="loaderRadio" value="vanilla">
-                  <div class="l-card-inner">
-                    <span class="l-icon">🧱</span>
-                    <div class="l-info">
-                      <span class="l-title">Vanilla</span>
-                      <span class="l-desc">Saf Minecraft</span>
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
             <!-- 4. COOKIE LAUNCHER ÖZEL OPTİMİZE MOTORU (Anahtar) -->
             <div class="optimize-banner-row">
               <div class="opt-banner-left">
@@ -330,9 +273,9 @@
     </main>
   </div>
 
-  <!-- =================== MODAL: YENİ PROFİL OLUŞTUR =================== -->
+  <!-- =================== MODAL: YENİ PROFİL (SEKMELİ YENİ ARAYÜZ) =================== -->
   <div class="modal-backdrop" id="createInstanceModal" style="display: none;">
-    <div class="modal-window create-instance-modal">
+    <div class="modal-window create-instance-modal np-modal">
       <div class="modal-top">
         <div class="modal-top-title">
           <span class="m-icon">🗂️</span>
@@ -341,61 +284,169 @@
         <button class="btn-close-modal" id="btnCloseCreateInstanceModal">✕</button>
       </div>
 
-      <div class="ci-body">
-        <div class="form-group">
-          <label for="instanceNameInput">Profil Adı</label>
-          <input type="text" id="instanceNameInput" class="styled-input" placeholder="örn: Optimize Survival" autocomplete="off" spellcheck="false">
-        </div>
+      <div class="np-layout">
+        <!-- SOL MENÜ: yalnızca 2 sekme -->
+        <aside class="np-sidebar" role="tablist" aria-label="Profil oluşturma yöntemi">
+          <button type="button" class="np-side-tab active" id="npTabCustom" data-np-tab="custom"
+                  role="tab" aria-selected="true" aria-controls="npPaneCustom">
+            <span class="np-side-icon">🛠️</span>
+            <span class="np-side-text">
+              <strong>Özel Profil</strong>
+              <small>Sürüm ve yükleyici seç</small>
+            </span>
+          </button>
+          <button type="button" class="np-side-tab" id="npTabPacks" data-np-tab="packs"
+                  role="tab" aria-selected="false" aria-controls="npPanePacks">
+            <span class="np-side-icon">📦</span>
+            <span class="np-side-text">
+              <strong>Mod Paketleri</strong>
+              <small>Modrinth'ten kur</small>
+            </span>
+          </button>
+        </aside>
 
-        <div class="form-group">
-          <label for="instanceVersionInput">Minecraft Sürümü</label>
-          <input type="text" id="instanceVersionInput" class="styled-input" list="versionsDatalist" placeholder="örn: 1.20.1" autocomplete="off" spellcheck="false">
-        </div>
+        <section class="np-content">
+          <!-- ==== SEKME 1: ÖZEL PROFİL ==== -->
+          <div class="np-pane active" id="npPaneCustom" role="tabpanel" aria-labelledby="npTabCustom">
+            <div class="np-grid-2">
+              <div class="form-group">
+                <label for="instanceNameInput">Profil Adı</label>
+                <input type="text" id="instanceNameInput" class="styled-input" placeholder="örn: Optimize Survival" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label for="instanceIconInput">Profil Resmi <span class="np-opt">(opsiyonel)</span></label>
+                <input type="text" id="instanceIconInput" class="styled-input" placeholder="https://.../ikon.png" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
 
-        <div class="form-group">
-          <label for="instanceIconInput">Profil Resmi (İkon URL — opsiyonel)</label>
-          <input type="text" id="instanceIconInput" class="styled-input" placeholder="https://.../ikon.png" autocomplete="off" spellcheck="false">
-        </div>
+            <div class="form-group">
+              <div class="label-row">
+                <label for="npVersionPicker">Minecraft Sürümü</label>
+                <span class="label-hint" id="npVersionHint">Yazıp arayın, listeden seçin</span>
+              </div>
+              <button type="button" class="np-version-picker" id="npVersionPicker" aria-haspopup="dialog">
+                <span class="nvp-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/>
+                  </svg>
+                </span>
+                <span class="nvp-text">
+                  <span class="nvp-label">Minecraft</span>
+                  <span class="nvp-version" id="npVersionPickerValue">1.20.4</span>
+                </span>
+                <span class="nvp-badge" id="npVersionPickerBadge" data-type="release">Release</span>
+                <span class="nvp-opt" id="npVersionPickerOpt" style="display:none;">⚡</span>
+                <span class="nvp-open-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
 
-        <div class="form-group">
-          <span class="ci-label">Mod Yükleyici</span>
-          <div class="loader-cards-grid">
-            <label class="loader-card active">
-              <input type="radio" name="instanceLoaderRadio" value="fabric" checked>
-              <div class="l-card-inner">
-                <span class="l-icon">⚡</span>
-                <div class="l-info">
-                  <span class="l-title">Fabric</span>
-                  <span class="l-desc">Yüksek Performans</span>
-                </div>
+            <div class="form-group">
+              <label>Mod Yükleyici</label>
+              <div class="np-loader-grid" id="npLoaderGrid">
+                <button type="button" class="np-loader-card" data-loader="vanilla">
+                  <span class="np-lc-icon" aria-hidden="true">🧱</span>
+                  <span class="np-lc-name">Vanilla</span>
+                  <small>Yükleyici yok</small>
+                </button>
+                <button type="button" class="np-loader-card" data-loader="neoforge">
+                  <span class="np-lc-icon" aria-hidden="true">🦊</span>
+                  <span class="np-lc-name">NeoForge</span>
+                  <small>Modern Forge</small>
+                </button>
+                <button type="button" class="np-loader-card" data-loader="forge">
+                  <span class="np-lc-icon" aria-hidden="true">🔨</span>
+                  <span class="np-lc-name">Forge</span>
+                  <small>Klasik modlar</small>
+                </button>
+                <button type="button" class="np-loader-card active" data-loader="fabric">
+                  <span class="np-lc-icon" aria-hidden="true">⚡</span>
+                  <span class="np-lc-name">Fabric</span>
+                  <small>Yüksek performans</small>
+                </button>
+                <button type="button" class="np-loader-card" data-loader="quilt">
+                  <span class="np-lc-icon" aria-hidden="true">🧵</span>
+                  <span class="np-lc-name">Quilt</span>
+                  <small>Fabric uyumlu</small>
+                </button>
               </div>
-            </label>
-            <label class="loader-card">
-              <input type="radio" name="instanceLoaderRadio" value="forge">
-              <div class="l-card-inner">
-                <span class="l-icon">🔨</span>
-                <div class="l-info">
-                  <span class="l-title">Forge</span>
-                  <span class="l-desc">Geleneksel</span>
-                </div>
+              <p class="np-loader-note" id="npLoaderNote"></p>
+            </div>
+
+            <div class="np-lv-box">
+              <div class="np-lv-left">
+                <span class="np-lv-title">Önerilen yükleyici sürümü</span>
+                <span class="np-lv-value" id="npLoaderRecommended"><span class="np-lv-spinner" aria-hidden="true"></span> hesaplanıyor...</span>
+                <span class="np-lv-sub" id="npLoaderReason">Sürüm + yükleyici seçildiğinde otomatik atanır</span>
               </div>
-            </label>
-            <label class="loader-card">
-              <input type="radio" name="instanceLoaderRadio" value="vanilla">
-              <div class="l-card-inner">
-                <span class="l-icon">🧱</span>
-                <div class="l-info">
-                  <span class="l-title">Vanilla</span>
-                  <span class="l-desc">Saf Minecraft</span>
-                </div>
+              <button type="button" class="np-adv-toggle" id="npAdvToggle" aria-expanded="false" aria-controls="npAdvPanel">⚙️ Gelişmiş</button>
+            </div>
+
+            <div class="np-adv" id="npAdvPanel" hidden>
+              <div class="form-group">
+                <label for="npLoaderVersionSelect">Loader Sürümü Değiştir</label>
+                <select id="npLoaderVersionSelect" class="styled-select">
+                  <option value="">Otomatik (önerilen)</option>
+                </select>
+                <span class="label-hint" id="npLoaderVersionHint">Boş bırakırsanız bu Minecraft sürümü için önerilen kararlı loader sürümü kurulur.</span>
               </div>
-            </label>
+            </div>
           </div>
-        </div>
+
+          <!-- ==== SEKME 2: MOD PAKETLERİ (yalnızca Modrinth) ==== -->
+          <div class="np-pane" id="npPanePacks" role="tabpanel" aria-labelledby="npTabPacks">
+            <div class="np-pack-top">
+              <div class="np-pack-search">
+                <span class="np-combo-icon" aria-hidden="true">🔍</span>
+                <input type="text" id="npPackSearchInput" class="styled-input" placeholder="Ara ve filtrele..." autocomplete="off">
+              </div>
+              <select id="npPackLoaderFilter" class="styled-select" aria-label="Yükleyici filtresi">
+                <option value="">Tüm yükleyiciler</option>
+                <option value="fabric">Fabric</option>
+                <option value="forge">Forge</option>
+                <option value="neoforge">NeoForge</option>
+                <option value="quilt">Quilt</option>
+              </select>
+              <select id="npPackVersionFilter" class="styled-select" aria-label="Minecraft sürümü filtresi"></select>
+              <button type="button" class="btn-primary-action" id="npPackSearchBtn">Ara</button>
+            </div>
+
+            <div class="np-pack-body">
+              <div class="np-pack-list" id="npPackList" role="listbox" aria-label="Mod paketleri"></div>
+              <div class="np-pack-detail" id="npPackDetail">
+                <div class="np-pack-empty">
+                  <span class="np-pack-empty-icon" aria-hidden="true">📦</span>
+                  <span>Detayları görmek için soldan bir mod paketi seçin.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="np-pack-bottom">
+              <div class="np-pack-bottom-left">
+              <label class="np-pack-bottom-item">
+                <span>Sırala</span>
+                <select id="npPackSortSelect" class="styled-select">
+                  <option value="relevance">İlgiye göre</option>
+                  <option value="downloads">En çok indirilen</option>
+                  <option value="newest">En yeni</option>
+                </select>
+              </label>
+              <label class="np-pack-bottom-item">
+                <span>Seçilen Sürüm</span>
+                <select id="npPackGameVersionSelect" class="styled-select"></select>
+              </label>
+              </div>
+              <button type="button" class="btn-primary-action np-pack-install" id="npPackInstallBtn" disabled>📦 Profil Olarak Kur</button>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="modal-bottom">
-        <span class="modal-tip-text">💡 Profil oluşturulunca otomatik olarak aktif edilir.</span>
+        <span class="modal-tip-text" id="npModalTip">💡 Profil oluşturulunca otomatik olarak aktif edilir.</span>
         <div class="ci-actions">
           <button class="btn-secondary" id="btnCancelCreateInstance">Vazgeç</button>
           <button class="btn-primary-action" id="btnConfirmCreateInstance">Oluştur ve Aktif Yap</button>
@@ -419,7 +470,7 @@
     </div>
   </div>
 
-  <!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
+<!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
   <div class="modal-backdrop" id="versionSelectorModal" style="display: none;">
     <div class="modal-window version-modal-window">
       <div class="modal-top">
@@ -430,96 +481,60 @@
         <button class="btn-close-modal" id="btnCloseVersionSelectorModal">✕</button>
       </div>
 
-      <div class="version-selector-layout">
-        <!-- SOL SÜTUN: Arama Kutusu & Sürüm Tablosu -->
-        <div class="version-table-col">
+      <div class="version-selector-body">
+        <div class="vmodal-topbar">
           <div class="version-search-input-box">
-            <span class="v-search-icon">🔍</span>
-            <input type="text" id="versionTableSearchInput" class="styled-input" placeholder="Sürüm ara... (örn: 1.20, snapshot, b1.8...)" autocomplete="off">
+            <span class="v-search-icon" aria-hidden="true">🔍</span>
+            <input type="text" id="versionTableSearchInput" class="styled-input" placeholder="Ara: 1.20.1, snapshot..." autocomplete="off">
             <button class="btn-clear-search" id="btnClearVersionSearch" style="display: none;">✕</button>
           </div>
-
-          <div class="table-scroll-area">
-            <table class="version-table" id="versionTable">
-              <thead>
-                <tr>
-                  <th style="width: 45%;">Sürüm Adı</th>
-                  <th style="width: 25%;">Tür</th>
-                  <th style="width: 30%; text-align: right;">Durum</th>
-                </tr>
-              </thead>
-              <tbody id="versionTableListBody">
-                <!-- Dinamik olarak JS tarafından doldurulacak -->
-              </tbody>
-            </table>
-            <div class="no-results-msg" id="versionNoResults" style="display: none;">
-              <span>Filtrelere ve arama kriterinize uygun sürüm bulunamadı.</span>
-            </div>
+          <div class="vfilter-pills" role="group" aria-label="Sürüm tipi filtreleri">
+            <label class="vpill vpill-opt" title="Yalnızca Cookie Launcher optimize profil hazır olan sürümler">
+              <input type="checkbox" id="cbFilterOptimized" class="version-filter-cb" data-category="optimized">
+              <span>⚡ Optimize</span>
+            </label>
+            <label class="vpill">
+              <input type="checkbox" id="cbFilterReleases" class="version-filter-cb" data-category="release" checked>
+              <span>Sürümler</span>
+            </label>
+            <label class="vpill">
+              <input type="checkbox" id="cbFilterSnapshots" class="version-filter-cb" data-category="snapshot">
+              <span>Snapshots</span>
+            </label>
+            <label class="vpill">
+              <input type="checkbox" id="cbFilterBetas" class="version-filter-cb" data-category="beta">
+              <span>Beta</span>
+            </label>
+            <label class="vpill">
+              <input type="checkbox" id="cbFilterAlphas" class="version-filter-cb" data-category="alpha">
+              <span>Alpha</span>
+            </label>
+            <label class="vpill">
+              <input type="checkbox" id="cbFilterExperimental" class="version-filter-cb" data-category="experimental">
+              <span>Deneysel</span>
+            </label>
           </div>
         </div>
 
-        <!-- SAĞ SÜTUN: Bağımsız Düşey Filtre Paneli (Filter Sidebar) -->
-        <aside class="version-filter-sidebar">
-          <h4 class="filter-sidebar-title">Filtrele</h4>
-          <div class="filter-checkbox-list">
-            
-            <!-- 1. Altın/Neon Parıltılı Özel Optimize Seçeneği -->
-            <label class="filter-cb-item filter-cb-optimized">
-              <input type="checkbox" id="cbFilterOptimized" class="version-filter-cb" data-category="optimized">
-              <span class="cb-checkmark cb-opt-check"></span>
-              <span class="cb-text-bold">⚡ COOKIE LAUNCHER ÖZEL OPTİMİZE</span>
-            </label>
+        <div class="vmodal-list" id="versionCardList" role="listbox" aria-label="Minecraft sürümleri">
+          <!-- JS doldurur -->
+        </div>
 
-            <!-- 2. Sürümler (Releases) - Varsayılan Seçili! -->
-            <label class="filter-cb-item">
-              <input type="checkbox" id="cbFilterReleases" class="version-filter-cb" data-category="release" checked>
-              <span class="cb-checkmark"></span>
-              <span>Sürümler (Releases)</span>
-            </label>
+        <div class="no-results-msg" id="versionNoResults" style="display: none;">
+          <span>Filtrelere ve arama kriterinize uygun sürüm bulunamadı.</span>
+        </div>
 
-            <!-- 3. Anlık Sürümler (Snapshots) -->
-            <label class="filter-cb-item">
-              <input type="checkbox" id="cbFilterSnapshots" class="version-filter-cb" data-category="snapshot">
-              <span class="cb-checkmark"></span>
-              <span>Anlık Sürümler (Snapshots)</span>
-            </label>
-
-            <!-- 4. Betalar (Betas) -->
-            <label class="filter-cb-item">
-              <input type="checkbox" id="cbFilterBetas" class="version-filter-cb" data-category="beta">
-              <span class="cb-checkmark"></span>
-              <span>Betalar (Betas)</span>
-            </label>
-
-            <!-- 5. Alfalar (Alphas) -->
-            <label class="filter-cb-item">
-              <input type="checkbox" id="cbFilterAlphas" class="version-filter-cb" data-category="alpha">
-              <span class="cb-checkmark"></span>
-              <span>Alfalar (Alphas)</span>
-            </label>
-
-            <!-- 6. Deneysel Sürümler (Experimental) -->
-            <label class="filter-cb-item">
-              <input type="checkbox" id="cbFilterExperimental" class="version-filter-cb" data-category="experimental">
-              <span class="cb-checkmark"></span>
-              <span>Deneysel Sürümler (Exp)</span>
-            </label>
-          </div>
-
-          <div class="filter-info-box">
-            <span id="versionFilteredCountText">0 sürüm</span>
-          </div>
-        </aside>
+        <div class="vmodal-count"><span id="versionFilteredCountText">0 sürüm</span></div>
       </div>
 
       <div class="modal-bottom">
-        <span class="modal-tip-text">💡 Seçmek istediğiniz sürümün satırına tıklamanız yeterlidir.</span>
+        <span class="modal-tip-text">💡 Seçmek istediğiniz sürümün kartına tıklamanız yeterlidir.</span>
         <button class="btn-secondary" id="btnCancelVersionSelectorModal">Kapat</button>
       </div>
     </div>
   </div>
 
-  <!-- =================== MODAL: CANLI İLERLEME ÇUBUĞU (NON-BLOCKING LAUNCH) =================== -->
+    <!-- =================== MODAL: CANLI İLERLEME ÇUBUĞU (NON-BLOCKING LAUNCH) =================== -->
   <div class="modal-backdrop" id="launchProgressModal" style="display: none;">
     <div class="modal-window progress-modal-window">
       <div class="progress-modal-inner">
