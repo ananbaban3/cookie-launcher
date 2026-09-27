@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   Tasarim temeli
+   ------------------------------------------------------------------ */
+@layer base {
+  body {
+    background-color: #08090d;
+    color: #e2e8f0;
+    overflow-x: hidden;
+  }
+
+  .grid-bg {
+    background-image: radial-gradient(rgba(245, 158, 11, 0.07) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .cookie-text-gradient {
+    background: linear-gradient(135deg, #fde68a 0%, #f59e0b 55%, #ea580c 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 7px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #08090d;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1e2333;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #f59e0b;
+  }
+
+  /* WCAG 2.4.7 - klavye kullanicisi odak konumunu gormeli.
+     Tum interaktif ogeler icin gorunur odak halkasi. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 3px solid #fbbf24;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  :where(a, button, [tabindex]):focus:not(:focus-visible) {
+    outline: none;
+  }
+  /* atlama baglantisi ile gelen odak cizgisi cizilmesin */
+  main:focus {
+    outline: none;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Bilesenler
+   ------------------------------------------------------------------ */
+@layer components {
+  /* "Icerige gec" atlama baglantisi: yalnizca odaklandiginda gorunur */
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100;
+    background: #f59e0b;
+    color: #020617;
+    font-weight: 700;
+    padding: 0.75rem 1.25rem;
+    border-radius: 0 0 0.75rem 0;
+  }
+  .skip-link:focus {
+    left: 0;
+  }
+
+  /* Yasal sayfalarda govde metni */
+  .legal {
+    @apply text-sm sm:text-[15px] leading-relaxed text-slate-300;
+  }
+  .legal p {
+    @apply mb-4;
+  }
+  .legal h3 {
+    @apply text-base font-bold text-white mt-7 mb-2;
+  }
+  .legal ul {
+    @apply mb-4 pl-5 space-y-2 list-disc marker:text-cookie-400;
+  }
+  .legal ol {
+    @apply mb-4 pl-5 space-y-2 list-decimal marker:text-cookie-400;
+  }
+  .legal strong {
+    @apply text-white;
+  }
+  .legal a {
+    @apply text-cookie-300 underline underline-offset-2 hover:text-cookie-200;
+  }
+  .legal code {
+    @apply font-mono text-[12px] px-1.5 py-0.5 rounded bg-surface-base border border-surface-border text-cookie-300;
+  }
+  .legal pre {
+    @apply my-5 p-4 rounded-xl bg-surface-base border border-surface-border overflow-x-auto;
+  }
+  .legal pre code {
+    @apply p-0 border-0 bg-transparent text-slate-300 text-xs;
+  }
+
+  .legal-note {
+    @apply text-xs rounded-xl border border-surface-border bg-surface-base p-4 text-slate-400 leading-relaxed;
+  }
+
+  .legal table {
+    @apply w-full text-xs my-5 border-collapse;
+  }
+  .legal th,
+  .legal td {
+    @apply border border-surface-border px-3 py-2.5 text-left align-top;
+  }
+  .legal th {
+    @apply text-white bg-surface-base font-bold;
+  }
+}
