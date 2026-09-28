@@ -108,6 +108,44 @@ function showErrorOnce(message) {
   showToast(message, "error");
 }
 
+// ================== MOD BAĞIMLILIK TERCİHİ (Faz 2) ==================
+function getInstallDepsPref() {
+  return localStorage.getItem("cl_install_deps") !== "false";
+}
+
+function syncInstallDepsToggles() {
+  const pref = getInstallDepsPref();
+  document.querySelectorAll(".install-deps-cb").forEach(cb => { cb.checked = pref; });
+}
+
+function setInstallDepsPref(value) {
+  localStorage.setItem("cl_install_deps", value ? "true" : "false");
+  syncInstallDepsToggles();
+}
+
+function bindInstallDepsToggle(el) {
+  if (!el) return;
+  el.checked = getInstallDepsPref();
+  if (el.dataset.bound === "1") return;
+  el.dataset.bound = "1";
+  el.addEventListener("change", () => setInstallDepsPref(el.checked));
+}
+
+function modInstallToast(name, data) {
+  const installed = (data && data.installed_dependencies) || [];
+  const failed = (data && data.failed_dependencies) || [];
+  const label = name || (data && data.filename) || "İçerik";
+  if (failed.length > 0) {
+    console.warn("Kurulamayan bağımlılıklar:", failed);
+    showToast(`⚠️ ${label} kuruldu ama ${failed.length} bağımlılık kurulamadı`, "error");
+  } else if (installed.length > 0) {
+    const names = installed.map(d => d.title || d.slug).filter(Boolean).join(", ");
+    showToast(`✓ ${label} kuruldu • ${installed.length} bağımlılık: ${names}`, "success");
+  } else {
+    showToast(`✓ ${label} kuruldu.`, "success");
+  }
+}
+
 // ================== ASLA HATA FIRLATMAYAN API KATMANI ==================
 async function apiGet(path, timeoutMs = 8000) {
   const controller = new AbortController();
@@ -158,7 +196,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 11) {
+        if (data && Number(data.api_version) >= 12) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -482,6 +520,9 @@ function setupEventListeners() {
       );
     });
   }
+
+  // Gerekli bağımlılıkları da kur onay kutusu (tercih localStorage'da)
+  bindInstallDepsToggle(document.getElementById("installDepsToggle"));
 
   // Ekran Görüntüsü Klasörü
   const btnOpenScreenshots = document.getElementById("btnOpenScreenshotsFolder");
@@ -2441,7 +2482,8 @@ async function downloadModrinthProject(hit, buttonEl, opts = {}) {
     loader: target.loader,
     instance_id: target.id,
     project_type: category,
-    force: force
+    force: force,
+    install_dependencies: getInstallDepsPref()
   }, 180000);
 
   // Backend tam uyum olmadigini bildirdiyse onay isteyip tekrar dene
@@ -2469,7 +2511,11 @@ async function downloadModrinthProject(hit, buttonEl, opts = {}) {
 
   if (data && data.success) {
     const warning = data.exact_match === false ? " (sürüm tam eşleşmiyor)" : "";
-    showToast(`✓ ${data.filename || slug} → "${target.name}" profiline kuruldu${warning}.`, "success");
+    if (data.installed_dependencies || data.failed_dependencies) {
+      modInstallToast(String((hit && hit.title) || slug), data);
+    } else {
+      showToast(`✓ ${data.filename || slug} → "${target.name}" profiline kuruldu${warning}.`, "success");
+    }
     await refreshInstalledContent();
     applyInstalledStates();
     loadInstances();
@@ -2571,6 +2617,7 @@ const pdsState = {
   activeTab: "mods",
   content: { mod: null, shader: null, resourcepack: null },
   contentError: "",
+  missingDeps: [],
   modrinth: { type: "mod", query: "", hits: [], loading: false, searched: false },
   drawerOpen: false
 };
@@ -2637,6 +2684,7 @@ function openProfileDetail(instanceId, tabId) {
   pdsState.activeTab = tabId || "mods";
   pdsState.content = { mod: null, shader: null, resourcepack: null };
   pdsState.contentError = "";
+  pdsState.missingDeps = [];
   pdsState.modrinth = { type: "mod", query: "", hits: [], loading: false, searched: false };
   pdsCloseDrawer();
 
@@ -2727,13 +2775,101 @@ function pdsRenderContentTab(pane, cat) {
       </div>
       <button type="button" class="btn-secondary" id="pdsRefreshBtn">↻ Yenile</button>
     </div>
+    ${cat === "mod" ? '<div class="pds-deps-warn" id="pdsDepsWarn" style="display:none;"></div>' : ""}
     <div class="pds-list" id="pdsListWrap">
       <div class="pds-loading"><div class="spinner"></div><span>İçerik listesi yükleniyor...</span></div>
     </div>
   `;
   const refresh = document.getElementById("pdsRefreshBtn");
-  if (refresh) refresh.addEventListener("click", () => pdsLoadContent(cat, true));
+  if (refresh) refresh.addEventListener("click", () => {
+    pdsLoadContent(cat, true);
+    if (cat === "mod") pdsLoadMissingDeps();
+  });
   pdsLoadContent(cat, false);
+  if (cat === "mod") pdsLoadMissingDeps();
+}
+
+async function pdsLoadMissingDeps() {
+  const warn = document.getElementById("pdsDepsWarn");
+  if (!warn || pdsState.activeTab !== "mods") return;
+
+  const data = await apiGet(
+    `/api/instances/missing-deps?instance=${encodeURIComponent(pdsState.instanceId)}`,
+    20000
+  );
+  if (pdsState.activeTab !== "mods" || !document.getElementById("pdsDepsWarn")) return;
+
+  const missing = (data && data.missing) || [];
+  pdsState.missingDeps = Array.isArray(missing) ? missing : [];
+
+  if (!data || data.success !== true || pdsState.missingDeps.length === 0) {
+    warn.style.display = "none";
+    warn.innerHTML = "";
+    return;
+  }
+
+  warn.style.display = "flex";
+  warn.innerHTML = "";
+
+  const text = document.createElement("span");
+  text.textContent = `⚠️ ${pdsState.missingDeps.length} eksik bağımlılık`;
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pds-deps-warn-btn";
+  btn.textContent = "Hepsini kur";
+  btn.addEventListener("click", () => pdsInstallAllMissingDeps(btn));
+
+  warn.appendChild(text);
+  warn.appendChild(btn);
+}
+
+async function pdsInstallAllMissingDeps(buttonEl) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+  const missing = Array.isArray(pdsState.missingDeps) ? pdsState.missingDeps.slice() : [];
+  if (missing.length === 0) return;
+
+  if (String(inst.loader || "").toLowerCase() === "vanilla") {
+    showToast("Vanilla profil mod yüklemez. Fabric/Forge profili kullanın.", "info");
+    return;
+  }
+
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+  let okCount = 0;
+  let failCount = 0;
+
+  for (const dep of missing) {
+    const name = dep.title || dep.slug || dep.project_id || "Bağımlılık";
+    showToast(`📥 Bağımlılık kuruluyor: ${name}...`, "info");
+    const data = await apiPost("/api/modrinth/install", {
+      slug: dep.slug,
+      version: inst.version,
+      loader: inst.loader,
+      instance_id: pdsState.instanceId,
+      project_type: "mod",
+      install_dependencies: true
+    }, 180000);
+
+    if (data && data.success) {
+      okCount++;
+      const installed = (data.installed_dependencies || []).map(d => d.title || d.slug).join(", ");
+      showToast(`✓ ${name} kuruldu${installed ? " • bağımlılıklar: " + installed : ""}`, "success");
+    } else {
+      failCount++;
+      const reason = (data && data.error) || "bilinmeyen hata";
+      console.warn("Bağımlılık kurulamadı:", dep, reason);
+      showToast(`⚠️ ${name} kurulamadı: ${reason}`, "error");
+    }
+  }
+
+  if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = "Hepsini kur"; }
+  await pdsLoadContent("mod", true);
+  await pdsLoadMissingDeps();
+  loadInstances();
+  if (okCount > 0 && failCount === 0) {
+    showToast(`✓ ${okCount} eksik bağımlılık kuruldu.`, "success");
+  }
 }
 
 async function pdsLoadContent(cat, force) {
@@ -3105,6 +3241,10 @@ function pdsRenderModrinthTab(pane) {
       </select>
       <input type="text" class="styled-input" id="pdsMrQuery" placeholder="Ara... (örn: sodium)" autocomplete="off" spellcheck="false">
       <button type="button" class="btn-primary-action" id="pdsMrSearchBtn">🔍 Ara</button>
+      <label class="pds-deps-toggle" title="Seçili modun Modrinth'teki zorunlu bağımlılıklarını da otomatik kurar">
+        <input type="checkbox" id="pdsInstallDepsToggle" class="install-deps-cb">
+        <span>🧷 Gerekli bağımlılıkları da kur</span>
+      </label>
     </div>
     <div class="pds-mr-grid" id="pdsMrResults"></div>
   `;
@@ -3112,6 +3252,7 @@ function pdsRenderModrinthTab(pane) {
   const typeSel = document.getElementById("pdsMrType");
   const input = document.getElementById("pdsMrQuery");
   const btn = document.getElementById("pdsMrSearchBtn");
+  bindInstallDepsToggle(document.getElementById("pdsInstallDepsToggle"));
 
   if (typeSel) {
     typeSel.value = pdsState.modrinth.type;
@@ -3256,7 +3397,8 @@ async function pdsInstallSearchHit(hit, buttonEl) {
     loader: inst.loader,
     instance_id: pdsState.instanceId,
     project_type: cat,
-    force: false
+    force: false,
+    install_dependencies: getInstallDepsPref()
   };
   const data = await apiPost("/api/modrinth/install", payload, 180000);
 
@@ -3271,20 +3413,25 @@ async function pdsInstallSearchHit(hit, buttonEl) {
     if (ok) {
       if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
       const forced = await apiPost("/api/modrinth/install", Object.assign({}, payload, { force: true }), 180000);
-      pdsHandleInstallResult(forced, buttonEl, original, cat);
+      pdsHandleInstallResult(forced, buttonEl, original, cat, hit);
     }
     return;
   }
-  pdsHandleInstallResult(data, buttonEl, original, cat);
+  pdsHandleInstallResult(data, buttonEl, original, cat, hit);
 }
 
-async function pdsHandleInstallResult(data, buttonEl, original, cat) {
+async function pdsHandleInstallResult(data, buttonEl, original, cat, hit) {
   if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "⚡ Kur"; }
 
   if (data && data.success) {
-    showToast(`✓ ${data.filename || "İçerik"} profile kuruldu.`, "success");
+    if (data.installed_dependencies || data.failed_dependencies) {
+      modInstallToast(String((hit && (hit.title || hit.slug)) || data.filename || "İçerik"), data);
+    } else {
+      showToast(`✓ ${data.filename || "İçerik"} profile kuruldu.`, "success");
+    }
     if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "✓ Yüklü"; }
     await pdsLoadContent(cat, true);
+    if (cat === "mod") pdsLoadMissingDeps();
     loadInstances();
   } else {
     showToast(`⚠️ ${(data && data.error) || "Kurulum tamamlanamadı."}`, "error");

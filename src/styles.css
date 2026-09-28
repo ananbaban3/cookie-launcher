@@ -4433,10 +4433,64 @@ body {
 /* ---------- Modrinth sekmesi ---------- */
 .pds-mr-bar {
   display: grid;
-  grid-template-columns: 170px 1fr auto;
+  grid-template-columns: 170px 1fr auto auto;
   gap: 10px;
   margin-bottom: 14px;
 }
+
+.pds-deps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.pds-deps-toggle:hover { color: #fff; }
+
+.pds-deps-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Eksik bağımlılık uyarı satırı */
+.pds-deps-warn {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  border-radius: var(--radius-md);
+  color: #ffcf70;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pds-deps-warn-btn {
+  flex-shrink: 0;
+  background: var(--accent-primary);
+  color: #14100a;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.pds-deps-warn-btn:hover { filter: brightness(1.1); }
+.pds-deps-warn-btn:disabled { opacity: 0.6; cursor: default; }
 
 .pds-mr-grid { display: flex; flex-direction: column; gap: 8px; }
 

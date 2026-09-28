@@ -120,7 +120,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 11
+API_VERSION = 12
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -1179,7 +1179,7 @@ def save_content_manifest(inst_id, data):
         pass
 
 
-def register_installed_content(inst_id, category, slug, filename, version=""):
+def register_installed_content(inst_id, category, slug, filename, version="", project_id="", version_id=""):
     """Profile kurulan mod/shader/doku paketini content_manifest.json'a kaydeder."""
     inst_dir = get_instance_dir(inst_id)
     if not inst_dir or not slug:
@@ -1187,12 +1187,493 @@ def register_installed_content(inst_id, category, slug, filename, version=""):
     cat = normalize_category(category)
     data = load_content_manifest(inst_id)
     data.setdefault(cat, {})
-    data[cat][str(slug)] = {
+    entry = {
         "filename": filename,
         "version": version,
         "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if project_id:
+        entry["project_id"] = project_id
+    if version_id:
+        entry["version_id"] = version_id
+    data[cat][str(slug)] = entry
     save_content_manifest(inst_id, data)
+
+
+# ==================== MODRINTH KURULUM INDEKSI ====================
+# Per-instance kucuk indeks: {slug: {filename, project_id, version_id}}.
+# Eksik bagimlilik taramasinda modlarin Modrinth projesini TAHMIN etmeden
+# kesin olarak cozmek icin kurulum aninda yazilir.
+MODRINTH_INDEX_FILE = ".modrinth_index.json"
+
+
+def load_modrinth_index(inst_id):
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return {}
+    path = os.path.join(inst_dir, MODRINTH_INDEX_FILE)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
+
+
+def save_modrinth_index(inst_id, data):
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not isinstance(data, dict):
+        return
+    try:
+        with open(os.path.join(inst_dir, MODRINTH_INDEX_FILE), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def register_modrinth_index(inst_id, slug, filename, project_id="", version_id=""):
+    if not inst_id or not slug:
+        return
+    data = load_modrinth_index(inst_id)
+    data[str(slug)] = {
+        "filename": filename or "",
+        "project_id": project_id or "",
+        "version_id": version_id or "",
+    }
+    save_modrinth_index(inst_id, data)
+
+
+def unregister_modrinth_index(inst_id, filenames):
+    """Verilen dosya adlarina ait indeks kayitlarini temizler."""
+    data = load_modrinth_index(inst_id)
+    if not data:
+        return
+    targets = {str(f).lower() for f in (filenames or []) if f}
+    if not targets:
+        return
+    changed = False
+    for slug in [s for s, e in data.items()
+                 if isinstance(e, dict) and str(e.get("filename", "")).lower() in targets]:
+        data.pop(slug, None)
+        changed = True
+    if changed:
+        save_modrinth_index(inst_id, data)
+
+
+# ==================== MOD BAGIMLILIK COZUCU ====================
+DEPENDENCY_MAX_DEPTH = 3
+
+
+def fetch_modrinth_version(version_id):
+    """GET /version/{id}; version nesnesini ya da None dondurur."""
+    safe = re.sub(r"[^a-zA-Z0-9\-_]", "", str(version_id or ""))
+    if not safe:
+        return None
+    try:
+        resp = requests.get(
+            f"{ModrinthFetcher.BASE_URL}/version/{safe}",
+            headers=ModrinthFetcher.HEADERS,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict):
+                return data
+        set_net_error("modrinth_version", Exception(f"HTTP {resp.status_code}"))
+    except Exception as e:
+        set_net_error("modrinth_version", e)
+        log_error(f"Modrinth sürüm bilgisi alınamadı ({safe}): {type(e).__name__}: {e}")
+    return None
+
+
+def fetch_modrinth_project_versions(project_id, game_version, loader):
+    """Projenin MC sürümü + yükleyici ile filtrelenmiş sürümlerini (en yeni önce) döndürür."""
+    safe = re.sub(r"[^a-zA-Z0-9\-_]", "", str(project_id or ""))
+    if not safe:
+        return []
+    try:
+        params = {
+            "game_versions": json.dumps([clean_minecraft_version(game_version)]),
+            "loaders": json.dumps([str(loader or "").lower()]),
+        }
+        resp = requests.get(
+            f"{ModrinthFetcher.BASE_URL}/project/{safe}/version",
+            params=params,
+            headers=ModrinthFetcher.HEADERS,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+        set_net_error("modrinth_versions", Exception(f"HTTP {resp.status_code}"))
+    except Exception as e:
+        set_net_error("modrinth_versions", e)
+        log_error(f"Modrinth sürüm listesi alınamadı ({safe}): {type(e).__name__}: {e}")
+    return []
+
+
+def fetch_modrinth_projects_batch(project_ids):
+    """Proje kimlikleri icin {id: proje} sozlugu dondurur (20'lik gruplar)."""
+    result = {}
+    ids = [str(i) for i in (project_ids or []) if i]
+    for i in range(0, len(ids), 20):
+        chunk = ids[i:i + 20]
+        try:
+            resp = requests.get(
+                f"{ModrinthFetcher.BASE_URL}/projects",
+                params={"ids": json.dumps(chunk)},
+                headers=ModrinthFetcher.HEADERS,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                for item in (resp.json() or []):
+                    if isinstance(item, dict) and item.get("id"):
+                        result[item["id"]] = item
+        except Exception as e:
+            set_net_error("modrinth_projects", e)
+            log_error(f"Modrinth proje toplu sorgusu başarısız: {type(e).__name__}: {e}")
+    return result
+
+
+def _version_primary_file(version):
+    files = (version or {}).get("files") or []
+    if not files:
+        return None
+    return next((f for f in files if f.get("primary")), files[0])
+
+
+def _version_has_game_loader(version, game_version, loader):
+    gvs = [str(g) for g in (version.get("game_versions") or [])]
+    loaders = [str(l).lower() for l in (version.get("loaders") or [])]
+    if clean_minecraft_version(game_version) not in gvs:
+        return False
+    if loader and str(loader).lower() not in loaders:
+        return False
+    return True
+
+
+def resolve_dependency_version(dep, game_version, loader):
+    """Bagimlilik kaydini kurulabilir version nesnesine cozer: (version, None) | (None, sebep)."""
+    version_id = str(dep.get("version_id") or "").strip()
+    if version_id:
+        version = fetch_modrinth_version(version_id)
+        if not version:
+            return None, "sürüm bilgisi alınamadı"
+        return version, None
+
+    project_id = str(dep.get("project_id") or "").strip()
+    if not project_id:
+        return None, "proje kimliği yok"
+
+    for version in fetch_modrinth_project_versions(project_id, game_version, loader):
+        if _version_has_game_loader(version, game_version, loader):
+            return version, None
+    return None, "uygun sürüm yok"
+
+
+def install_required_dependencies(inst_id, target_dir, game_version, loader,
+                                  root_project_id="", root_version_id="", root_slug=""):
+    """Ana modun yalnizca 'required' bagimliliklarini ozyinelemeli kurar.
+
+    Derinlik siniri DEPENDENCY_MAX_DEPTH, dongu korumasi project_id tabanli
+    visited set ile saglanir. Donen sozluk UI yanitina eklenir.
+    """
+    result = {
+        "installed_dependencies": [],
+        "failed_dependencies": [],
+        "optional_dependencies": [],
+        "skipped_existing": [],
+    }
+    project_cache = {}
+    seen_optional = set()
+
+    index = load_modrinth_index(inst_id)
+    installed_pids = set()
+    installed_vids = set()
+    for entry in index.values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("project_id"):
+            installed_pids.add(str(entry["project_id"]))
+        if entry.get("version_id"):
+            installed_vids.add(str(entry["version_id"]))
+    installed_files = set()
+    if os.path.isdir(target_dir):
+        try:
+            installed_files = {f.lower() for f in os.listdir(target_dir)}
+        except Exception:
+            installed_files = set()
+
+    visited = set()
+    if root_project_id:
+        visited.add(str(root_project_id))
+
+    def project_info(project_id):
+        pid = str(project_id or "")
+        if not pid:
+            return {}
+        if pid not in project_cache:
+            project_cache[pid] = fetch_modrinth_project(pid) or {}
+        return project_cache[pid]
+
+    def already_installed(project_id, version_id, filename):
+        pid, vid = str(project_id or ""), str(version_id or "")
+        if pid and pid in installed_pids:
+            for entry in index.values():
+                if isinstance(entry, dict) and str(entry.get("project_id")) == pid:
+                    return str(entry.get("filename") or filename or "")
+            return filename or ""
+        if vid and vid in installed_vids:
+            for entry in index.values():
+                if isinstance(entry, dict) and str(entry.get("version_id")) == vid:
+                    return str(entry.get("filename") or filename or "")
+            return filename or ""
+        if filename and str(filename).lower() in installed_files:
+            return str(filename)
+        return None
+
+    def record_optional(dep):
+        pid = str(dep.get("project_id") or "")
+        if not pid and dep.get("version_id"):
+            ver = fetch_modrinth_version(dep["version_id"])
+            pid = str((ver or {}).get("project_id") or "")
+        if not pid or pid in seen_optional:
+            return
+        seen_optional.add(pid)
+        info = project_info(pid)
+        result["optional_dependencies"].append({
+            "title": info.get("title") or dep.get("file_name") or pid,
+            "slug": info.get("slug") or pid,
+        })
+
+    def walk(version, depth):
+        for dep in (version or {}).get("dependencies") or []:
+            if not isinstance(dep, dict):
+                continue
+            dtype = str(dep.get("dependency_type") or "required")
+            if dtype == "optional":
+                record_optional(dep)
+                continue
+            if dtype != "required":
+                continue  # incompatible / embedded atlanir
+
+            project_id = str(dep.get("project_id") or "")
+            if project_id and project_id in visited:
+                continue  # dongu korumasi
+
+            dep_version, reason = resolve_dependency_version(dep, game_version, loader)
+            real_pid = str((dep_version or {}).get("project_id") or project_id)
+            if real_pid and real_pid in visited:
+                continue
+
+            info = project_info(real_pid) if real_pid else {}
+            slug = info.get("slug") or real_pid or dep.get("file_name") or "bilinmeyen"
+            title = info.get("title") or slug
+
+            if dep_version is None:
+                result["failed_dependencies"].append({"slug": slug, "reason": reason or "uygun sürüm yok"})
+                add_log(f"⚠️ Bağımlılık kurulamadı ({slug}): {reason}")
+                continue
+
+            if str(info.get("project_type") or dep_version.get("project_type") or "mod") == "modpack":
+                add_log(f"ℹ️ Modpack tipi bağımlılık atlandı: {slug}")
+                continue
+
+            primary = _version_primary_file(dep_version)
+            if not primary or not primary.get("url"):
+                result["failed_dependencies"].append({"slug": slug, "reason": "indirilebilir dosya yok"})
+                continue
+
+            fname = primary.get("filename") or dep.get("file_name") or ""
+            if not fname:
+                result["failed_dependencies"].append({"slug": slug, "reason": "dosya adı yok"})
+                continue
+
+            existing = already_installed(real_pid, dep_version.get("id"), fname)
+            if existing is not None:
+                if real_pid:
+                    visited.add(real_pid)
+                result["skipped_existing"].append({"slug": slug, "filename": existing or fname})
+                continue
+
+            dest = os.path.join(target_dir, fname)
+            if os.path.exists(dest):
+                installed_files.add(fname.lower())
+                if real_pid:
+                    visited.add(real_pid)
+                result["skipped_existing"].append({"slug": slug, "filename": fname})
+                continue
+
+            try:
+                ModrinthFetcher.download_file(primary["url"], dest)
+            except Exception as e:
+                set_net_error("modrinth_dependency_download", e)
+                log_error(f"Bağımlılık indirme hatası ({slug}): {type(e).__name__}: {e}")
+                result["failed_dependencies"].append({"slug": slug, "reason": f"indirme hatası: {e}"})
+                continue
+
+            version_number = str(dep_version.get("version_number") or "")
+            register_installed_content(
+                inst_id, "mod", slug, fname, version_number,
+                project_id=real_pid, version_id=str(dep_version.get("id") or ""),
+            )
+            register_modrinth_index(inst_id, slug, fname, real_pid, str(dep_version.get("id") or ""))
+            installed_files.add(fname.lower())
+            if real_pid:
+                installed_pids.add(real_pid)
+                visited.add(real_pid)
+            if dep_version.get("id"):
+                installed_vids.add(str(dep_version["id"]))
+            result["installed_dependencies"].append({
+                "title": title,
+                "slug": slug,
+                "version_number": version_number,
+                "filename": fname,
+            })
+            add_log(f"📥 Bağımlılık kuruldu: {title} ({fname})")
+
+            if depth < DEPENDENCY_MAX_DEPTH:
+                walk(dep_version, depth + 1)
+            else:
+                add_log(f"ℹ️ Bağımlılık derinlik sınırı ({DEPENDENCY_MAX_DEPTH}) aşıldı: {slug}")
+
+    root_version = fetch_modrinth_version(root_version_id) if root_version_id else None
+    if root_version is None and root_project_id:
+        for candidate in fetch_modrinth_project_versions(root_project_id, game_version, loader):
+            if _version_has_game_loader(candidate, game_version, loader):
+                root_version = candidate
+                break
+    if root_version is not None:
+        walk(root_version, 1)
+    elif root_project_id or root_version_id:
+        add_log(f"ℹ️ {root_slug or root_project_id} için bağımlılık bilgisi alınamadı.")
+    return result
+
+
+def compute_missing_dependencies(inst_id):
+    """Profilde kurulu modlarin zorunlu bagimliliklarindan eksik olanlari listeler."""
+    inst = load_instance_config(inst_id)
+    if not inst:
+        return {"success": False, "error": "Profil bulunamadı."}
+
+    game_version = clean_minecraft_version(inst.get("version") or "")
+    loader = str(inst.get("loader") or "fabric").lower()
+    inst_dir = get_instance_dir(inst_id)
+    mods_dir = os.path.join(inst_dir, "mods")
+    manifest = load_content_manifest(inst_id).get("mod") or {}
+    index = load_modrinth_index(inst_id)
+
+    by_filename = {}
+    for slug, entry in manifest.items():
+        if isinstance(entry, dict) and entry.get("filename"):
+            by_filename[str(entry["filename"]).lower()] = (str(slug), entry)
+
+    installed_files = set()
+    mod_files = []
+    if os.path.isdir(mods_dir):
+        try:
+            for f in os.listdir(mods_dir):
+                fp = os.path.join(mods_dir, f)
+                if os.path.isfile(fp) and f.lower().endswith((".jar", ".jar.disabled")):
+                    installed_files.add(f.lower())
+                    mod_files.append(f)
+        except Exception:
+            pass
+
+    installed_pids = set()
+    installed_vids = set()
+    for entry in index.values():
+        if isinstance(entry, dict):
+            if entry.get("project_id"):
+                installed_pids.add(str(entry["project_id"]))
+            if entry.get("version_id"):
+                installed_vids.add(str(entry["version_id"]))
+
+    unidentified = 0
+    checked_pids = set()
+    missing_pids = {}
+
+    for fname in mod_files:
+        base = fname[:-len(".disabled")] if fname.lower().endswith(".disabled") else fname
+        slug_info = by_filename.get(base.lower())
+        if not slug_info:
+            unidentified += 1  # kurulum kaydi yok: projeyi tahmin etme, atla
+            continue
+        slug, entry = slug_info
+        index_entry = index.get(slug)
+        index_entry = index_entry if isinstance(index_entry, dict) else {}
+        project_id = str(index_entry.get("project_id") or entry.get("project_id") or "")
+        version_id = str(index_entry.get("version_id") or entry.get("version_id") or "")
+
+        if not project_id:
+            project = fetch_modrinth_project(slug)
+            project_id = str(project.get("id") or "")
+        if not project_id:
+            unidentified += 1
+            continue
+        if project_id in checked_pids:
+            continue
+        checked_pids.add(project_id)
+        installed_pids.add(project_id)
+
+        version = fetch_modrinth_version(version_id) if version_id else None
+        if version is None:
+            candidates = fetch_modrinth_project_versions(project_id, game_version, loader)
+            wanted = str(entry.get("version") or "")
+            if wanted:
+                version = next(
+                    (v for v in candidates if str(v.get("version_number") or "") == wanted),
+                    None,
+                )
+            if version is None and candidates:
+                version = candidates[0]
+        if version is None:
+            unidentified += 1
+            continue
+
+        for dep in version.get("dependencies") or []:
+            if not isinstance(dep, dict):
+                continue
+            if str(dep.get("dependency_type") or "required") != "required":
+                continue
+            dep_pid = str(dep.get("project_id") or "")
+            dep_vid = str(dep.get("version_id") or "")
+            if not dep_pid and dep_vid:
+                dep_version = fetch_modrinth_version(dep_vid)
+                if dep_version:
+                    dep_pid = str(dep_version.get("project_id") or "")
+            if not dep_pid:
+                continue
+            if dep_pid in installed_pids:
+                continue
+            if dep_vid and dep_vid in installed_vids:
+                continue
+            dep_file = str(dep.get("file_name") or "")
+            if dep_file and dep_file.lower() in installed_files:
+                continue
+            missing_pids[dep_pid] = True
+
+    projects = fetch_modrinth_projects_batch(list(missing_pids.keys()))
+    missing = []
+    for pid in missing_pids:
+        info = projects.get(pid) or {}
+        missing.append({
+            "slug": info.get("slug") or pid,
+            "title": info.get("title") or info.get("slug") or pid,
+            "project_id": pid,
+        })
+
+    return {
+        "success": True,
+        "instance": inst_id,
+        "missing": missing,
+        "unidentified": unidentified,
+    }
 
 
 # (dosya_yolu, mtime, boyut) -> meta. OrderedDict + ust sinir (LRU) kullanilir;
@@ -1464,6 +1945,7 @@ def delete_instance_content(inst_id, category, name):
                  if isinstance(e, dict) and str(e.get("filename", "")).lower() in (safe_lower, base_lower)]:
         entries.pop(slug, None)
     save_content_manifest(inst_id, data)
+    unregister_modrinth_index(inst_id, [safe_lower, base_lower])
     return True, safe
 
 
@@ -2080,7 +2562,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "api_version": API_VERSION,
                     "features": ["instances", "modpack", "instance_mods", "content_manage",
                                  "content_icons", "loader_versions", "net_test",
-                                 "profile_detail", "content_toggle"],
+                                 "profile_detail", "content_toggle", "mod_deps"],
                 })
                 return
 
@@ -2264,6 +2746,12 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 return
 
+            # 6c-2. Profildeki Eksik Zorunlu Mod Bagimliliklari
+            if path == "/instances/missing-deps":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                self.send_json(compute_missing_dependencies(inst_id))
+                return
+
             # 6d. Icerik Ikonu (jar/zip icinden cikarilir)
             if path == "/instances/content/icon":
                 inst_id = query.get("instance_id", [""])[0] or query.get("instance", [""])[0]
@@ -2378,6 +2866,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 instance_id = body.get("instance_id")
                 project_type = normalize_category(body.get("project_type") or body.get("content_type") or "mod")
                 force = bool(body.get("force"))
+                install_dependencies = bool(body.get("install_dependencies"))
                 category_dir = CATEGORY_DIRS[project_type]
 
                 if not slug:
@@ -2460,13 +2949,52 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         ModrinthFetcher.download_file(info["url"], dest)
                         add_log(f"✓ Başarıyla kuruldu: {fname}")
 
+                    # CDN URL'inden proje/surum kimliklerini cikar (bagimlilik cozumu icin)
+                    main_pid, main_vid = "", ""
+                    url_match = re.search(r"/data/([^/]+)/versions/([^/]+)/", str(info.get("url") or ""))
+                    if url_match:
+                        main_pid, main_vid = url_match.group(1), url_match.group(2)
+
+                    deps_result = None
+
                     if instance_id:
                         register_installed_content(
                             instance_id, project_type, slug, fname,
                             info.get("version_number") or "",
+                            project_id=main_pid, version_id=main_vid,
                         )
+                        if main_pid or main_vid:
+                            register_modrinth_index(instance_id, slug, fname, main_pid, main_vid)
 
-                    self.send_json({
+                        if install_dependencies and project_type == "mod":
+                            add_log(
+                                f"🔗 {slug} için zorunlu bağımlılıklar çözülüyor "
+                                f"(MC {clean_v} • {loader})..."
+                            )
+                            try:
+                                deps_result = install_required_dependencies(
+                                    instance_id, target_dir, clean_v, loader,
+                                    root_project_id=main_pid,
+                                    root_version_id=main_vid,
+                                    root_slug=slug,
+                                )
+                            except Exception as dep_err:
+                                set_net_error("modrinth_dependencies", dep_err)
+                                log_error(
+                                    f"Bağımlılık çözümleme hatası ({slug}): "
+                                    f"{type(dep_err).__name__}: {dep_err}"
+                                )
+                                deps_result = {
+                                    "installed_dependencies": [],
+                                    "failed_dependencies": [{
+                                        "slug": slug,
+                                        "reason": f"bağımlılık çözümleyici hatası: {dep_err}",
+                                    }],
+                                    "optional_dependencies": [],
+                                    "skipped_existing": [],
+                                }
+
+                    response = {
                         "success": True,
                         "filename": fname,
                         "target": target_label,
@@ -2474,7 +3002,10 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         "exact_match": exact_match,
                         "matched_game_version": (info.get("game_versions") or [""])[0] if info.get("game_versions") else "",
                         "message": f"{fname} → {target_label} kuruldu.",
-                    })
+                    }
+                    if deps_result is not None:
+                        response.update(deps_result)
+                    self.send_json(response)
                 except Exception as e:
                     add_log(f"Icerik kurulum hatasi ({slug}): {e}")
                     self.send_json({"success": False, "error": f"Kurulamadı: {e}"})
