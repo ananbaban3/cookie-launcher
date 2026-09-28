@@ -158,7 +158,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 10) {
+        if (data && Number(data.api_version) >= 11) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -181,6 +181,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadInstances();
   startStatusPolling();
   setupTauriWindowControls();
+  initProfileDetailScreen();
 });
 
 function initUI() {
@@ -697,8 +698,8 @@ function renderInstances() {
 
     const btnMods = document.createElement("button");
     btnMods.className = "btn-inst";
-    btnMods.textContent = "📂 Modlar";
-    btnMods.addEventListener("click", () => openSystemFolder(`instances/${inst.id}/mods`));
+    btnMods.textContent = "📋 Detaylar";
+    btnMods.addEventListener("click", () => openProfileDetail(inst.id, "mods"));
 
     const btnDelete = document.createElement("button");
     btnDelete.className = "btn-inst btn-inst-danger";
@@ -2537,4 +2538,951 @@ function setupTauriWindowControls() {
 
   if (btnMin) btnMin.addEventListener("click", () => window.blur());
   if (btnClose) btnClose.addEventListener("click", () => window.close());
+}
+
+/* ==============================================================================
+   PROFİL DETAY EKRANI (FAZ 1)
+   Tam ekran katman, 12 sekmeli dikey menü, içerik yönetimi, mod çekmecesi.
+   ============================================================================== */
+
+const PDS_CAT_INFO = {
+  mod: { label: "Modlar", icon: "🧩", dir: "mods" },
+  shader: { label: "Shader Paketleri", icon: "✨", dir: "shaderpacks" },
+  resourcepack: { label: "Kaynak Paketleri", icon: "🎨", dir: "resourcepacks" }
+};
+
+// Faz 2/3 sekmeleri: menüde görünür, içerik olarak "Yakında" kartı gösterilir.
+const PDS_SOON_TABS = {
+  notes: { label: "Notlar", icon: "📝", folder: "notes", desc: "Profil notları sekmesi yakında: not defteri ve hızlı kayıtlar." },
+  worlds: { label: "Dünyalar", icon: "🌍", folder: "saves", desc: "Dünya yönetimi yakında: listeleme, kopyalama ve yedekleme." },
+  servers: { label: "Sunucular", icon: "🌐", folder: "servers", desc: "Sunucu listesi yönetimi yakında: hızlı bağlantı ve favoriler." },
+  screenshots: { label: "Ekran Görüntüleri", icon: "📸", folder: "screenshots", desc: "Profil bazlı ekran görüntüsü galerisi yakında." },
+  others: { label: "Diğer Kayıtlar", icon: "🗄️", folder: "logs", desc: "Log ve crash kayıtları yönetimi yakında." }
+};
+
+const PDS_LOADER_LABELS = {
+  vanilla: "Vanilla", fabric: "Fabric", forge: "Forge", neoforge: "NeoForge", quilt: "Quilt"
+};
+
+const pdsState = {
+  initialized: false,
+  instanceId: "",
+  instance: null,
+  activeTab: "mods",
+  content: { mod: null, shader: null, resourcepack: null },
+  contentError: "",
+  modrinth: { type: "mod", query: "", hits: [], loading: false, searched: false },
+  drawerOpen: false
+};
+
+function pdsEsc(value) {
+  return escapeHtml(value === null || value === undefined ? "" : value);
+}
+
+function pdsLoaderLabel(loader) {
+  const key = String(loader || "vanilla").toLowerCase();
+  return PDS_LOADER_LABELS[key] || String(loader || "—");
+}
+
+function pdsTabForCat(cat) {
+  return cat === "mod" ? "mods" : cat;
+}
+
+function initProfileDetailScreen() {
+  if (pdsState.initialized) return;
+  pdsState.initialized = true;
+
+  const back = document.getElementById("pdsBackBtn");
+  const close = document.getElementById("pdsCloseBtn");
+  const drawerClose = document.getElementById("pdsDrawerClose");
+  const backdrop = document.getElementById("pdsDrawerBackdrop");
+
+  if (back) back.addEventListener("click", closeProfileDetail);
+  if (close) close.addEventListener("click", closeProfileDetail);
+  if (drawerClose) drawerClose.addEventListener("click", pdsCloseDrawer);
+  if (backdrop) backdrop.addEventListener("click", pdsCloseDrawer);
+
+  document.querySelectorAll(".pds-side-tab").forEach(btn => {
+    btn.addEventListener("click", () => pdsSwitchTab(btn.getAttribute("data-pds-tab")));
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const screen = document.getElementById("profileDetailScreen");
+    if (!screen || screen.style.display === "none") return;
+    // Üstte açık bir modal varsa ESC'yi ona bırak
+    const modalOpen = Array.from(document.querySelectorAll(".modal-backdrop"))
+      .some(m => m && m.style.display === "flex");
+    if (modalOpen) return;
+    if (pdsState.drawerOpen) { pdsCloseDrawer(); return; }
+    closeProfileDetail();
+  });
+}
+
+function pdsSyncInstance() {
+  const fresh = getInstanceById(pdsState.instanceId);
+  if (fresh) pdsState.instance = fresh;
+  return pdsState.instance;
+}
+
+function openProfileDetail(instanceId, tabId) {
+  const inst = getInstanceById(instanceId);
+  if (!inst) {
+    showToast("Profil bulunamadı.", "error");
+    return;
+  }
+
+  pdsState.instanceId = instanceId;
+  pdsState.instance = inst;
+  pdsState.activeTab = tabId || "mods";
+  pdsState.content = { mod: null, shader: null, resourcepack: null };
+  pdsState.contentError = "";
+  pdsState.modrinth = { type: "mod", query: "", hits: [], loading: false, searched: false };
+  pdsCloseDrawer();
+
+  const screen = document.getElementById("profileDetailScreen");
+  if (!screen) return;
+  screen.style.display = "flex";
+  screen.setAttribute("aria-hidden", "false");
+
+  pdsRenderHeader();
+  pdsSwitchTab(pdsState.activeTab);
+}
+
+function closeProfileDetail() {
+  const screen = document.getElementById("profileDetailScreen");
+  if (!screen) return;
+  pdsCloseDrawer();
+  screen.style.display = "none";
+  screen.setAttribute("aria-hidden", "true");
+}
+
+function pdsRenderHeader() {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const iconEl = document.getElementById("pdsHeadIcon");
+  const nameEl = document.getElementById("pdsHeadName");
+  const metaEl = document.getElementById("pdsHeadMeta");
+
+  if (nameEl) nameEl.textContent = inst.name || "Profil";
+  if (metaEl) {
+    const loaderText = pdsLoaderLabel(inst.loader) + (inst.loader_version ? ` ${inst.loader_version}` : "");
+    metaEl.textContent = `MC ${inst.version || "?"} • ${loaderText} • ${inst.mod_count || 0} mod`;
+  }
+  if (iconEl) {
+    iconEl.innerHTML = "";
+    iconEl.classList.remove("pds-letter");
+    if (inst.icon) {
+      const img = document.createElement("img");
+      img.src = inst.icon;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => {
+        img.remove();
+        iconEl.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+        iconEl.classList.add("pds-letter");
+      });
+      iconEl.appendChild(img);
+    } else {
+      iconEl.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+      iconEl.classList.add("pds-letter");
+    }
+  }
+}
+
+function pdsSwitchTab(tabId) {
+  pdsState.activeTab = tabId;
+  document.querySelectorAll(".pds-side-tab").forEach(btn => {
+    btn.classList.toggle("active", btn.getAttribute("data-pds-tab") === tabId);
+  });
+
+  const content = document.getElementById("pdsContent");
+  if (!content) return;
+  content.scrollTop = 0;
+  content.innerHTML = "";
+
+  const pane = document.createElement("div");
+  pane.className = "pds-pane";
+  content.appendChild(pane);
+
+  if (tabId === "logs") return pdsRenderLogsTab(pane);
+  if (tabId === "version") return pdsRenderVersionTab(pane);
+  if (tabId === "modrinth") return pdsRenderModrinthTab(pane);
+  if (tabId === "settings") return pdsRenderSettingsTab(pane);
+  if (tabId === "mods") return pdsRenderContentTab(pane, "mod");
+  if (tabId === "shader") return pdsRenderContentTab(pane, "shader");
+  if (tabId === "resourcepack") return pdsRenderContentTab(pane, "resourcepack");
+  return pdsRenderSoonTab(pane, tabId);
+}
+
+// ---------- İçerik sekmeleri (Modlar / Kaynak / Shader) ----------
+function pdsRenderContentTab(pane, cat) {
+  const info = PDS_CAT_INFO[cat];
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">${info.icon} ${info.label}</h3>
+        <p class="pds-section-sub">Bu profildeki kurulu içerikler. Anahtarla aç/kapat, detaydan Modrinth bilgisine bak.</p>
+      </div>
+      <button type="button" class="btn-secondary" id="pdsRefreshBtn">↻ Yenile</button>
+    </div>
+    <div class="pds-list" id="pdsListWrap">
+      <div class="pds-loading"><div class="spinner"></div><span>İçerik listesi yükleniyor...</span></div>
+    </div>
+  `;
+  const refresh = document.getElementById("pdsRefreshBtn");
+  if (refresh) refresh.addEventListener("click", () => pdsLoadContent(cat, true));
+  pdsLoadContent(cat, false);
+}
+
+async function pdsLoadContent(cat, force) {
+  if (!pdsSyncInstance()) return;
+
+  if (!force && pdsState.content[cat]) {
+    if (pdsState.activeTab === pdsTabForCat(cat)) pdsRenderContentList(cat);
+    return;
+  }
+
+  pdsState.contentError = "";
+  const data = await apiGet(`/api/instances/content?instance_id=${encodeURIComponent(pdsState.instanceId)}`, 10000);
+  if (!data || data.success !== true) {
+    pdsState.contentError = "İçerik listesi alınamadı. Core bağlantısını kontrol edin.";
+    if (pdsState.activeTab === pdsTabForCat(cat)) pdsRenderContentList(cat);
+    return;
+  }
+
+  const categories = data.categories || {};
+  const files = (categories[cat] && categories[cat].files) || [];
+  pdsState.content[cat] = Array.isArray(files) ? files : [];
+  if (pdsState.activeTab === pdsTabForCat(cat)) pdsRenderContentList(cat);
+}
+
+function pdsRenderContentList(cat) {
+  const wrap = document.getElementById("pdsListWrap");
+  if (!wrap) return;
+  const info = PDS_CAT_INFO[cat];
+  const files = pdsState.content[cat] || [];
+
+  if (pdsState.contentError) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc(pdsState.contentError)}</div>`;
+    return;
+  }
+  if (files.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">Bu profilde henüz ${info.label.toLowerCase()} yok.<br>Modrinth sekmesinden kurulum yapabilirsiniz.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  files.forEach(f => {
+    const row = document.createElement("div");
+    row.className = "pds-item" + (f.enabled === false ? " is-off" : "");
+
+    const iconBox = document.createElement("div");
+    iconBox.className = "pds-item-icon";
+    iconBox.textContent = info.icon;
+    if (f.has_icon) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.loading = "lazy";
+      img.src = `${API_BASE}/api/instances/content/icon?instance_id=${encodeURIComponent(pdsState.instanceId)}` +
+        `&category=${encodeURIComponent(cat)}&name=${encodeURIComponent(f.name)}&t=${Math.round(f.mtime || 0)}`;
+      img.addEventListener("error", () => { img.remove(); iconBox.textContent = info.icon; });
+      iconBox.textContent = "";
+      iconBox.appendChild(img);
+    }
+
+    const displayName = (f.display_name && String(f.display_name).trim()) || cleanContentName(f.name);
+    const sizeText = f.is_dir
+      ? "klasör"
+      : (f.size >= 1048576 ? `${(f.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((f.size || 0) / 1024))} KB`);
+
+    const infoEl = document.createElement("div");
+    infoEl.className = "pds-item-info";
+    infoEl.innerHTML = `
+      <div class="pds-item-name-line">
+        <span class="pds-item-name" title="${pdsEsc(f.description || f.name)}">${pdsEsc(displayName)}</span>
+        ${f.version ? `<span class="pds-ver-badge">v${pdsEsc(f.version)}</span>` : ""}
+        ${f.enabled === false ? `<span class="pds-off-badge">DEVRE DIŞI</span>` : ""}
+      </div>
+      <div class="pds-item-meta" title="${pdsEsc(f.name)}">${pdsEsc(f.name)} • ${pdsEsc(sizeText)}</div>
+    `;
+
+    const toggle = document.createElement("label");
+    toggle.className = "toggle-switch pds-toggle";
+    toggle.title = f.enabled === false ? "Etkinleştir" : "Devre dışı bırak";
+    toggle.innerHTML = `<input type="checkbox" ${f.enabled === false ? "" : "checked"}><span class="toggle-slider"></span>`;
+    const cb = toggle.querySelector("input");
+    if (cb) cb.addEventListener("change", () => pdsToggleContent(cat, f, cb));
+
+    const actions = document.createElement("div");
+    actions.className = "pds-item-actions";
+
+    const detailBtn = document.createElement("button");
+    detailBtn.type = "button";
+    detailBtn.className = "pds-btn";
+    detailBtn.textContent = "Detay";
+    detailBtn.addEventListener("click", () => pdsOpenDrawer(f, cat));
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "pds-btn pds-btn-danger";
+    delBtn.title = "Sil";
+    delBtn.textContent = "🗑";
+    delBtn.addEventListener("click", () => pdsDeleteContent(cat, f));
+
+    actions.appendChild(toggle);
+    actions.appendChild(detailBtn);
+    actions.appendChild(delBtn);
+
+    row.appendChild(iconBox);
+    row.appendChild(infoEl);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+async function pdsToggleContent(cat, item, checkbox) {
+  if (checkbox) checkbox.disabled = true;
+  const data = await apiPost("/api/instances/content/toggle", {
+    instance: pdsState.instanceId,
+    category: cat,
+    name: item.name
+  }, 15000);
+  if (checkbox) checkbox.disabled = false;
+
+  if (data && data.success) {
+    showToast(data.enabled ? `✓ Etkinleştirildi: ${data.name}` : `⏸ Devre dışı: ${data.name}`, "success");
+    await pdsLoadContent(cat, true);
+    loadInstances();
+  } else {
+    if (checkbox) checkbox.checked = item.enabled !== false;
+    showToast(`⚠️ ${(data && data.error) || "İçerik güncellenemedi."}`, "error");
+  }
+}
+
+async function pdsDeleteContent(cat, item) {
+  const inst = pdsSyncInstance();
+  const ok = await showConfirmDialog({
+    icon: "🗑️",
+    title: "İçerik Silinsin mi?",
+    message: `"${item.name}" dosyası "${inst ? inst.name : "profil"}" profilinden kalıcı olarak silinecek. Bu işlem geri alınamaz.`,
+    okText: "Sil",
+    danger: true
+  });
+  if (!ok) return;
+
+  const data = await apiPost("/api/instances/content/delete", {
+    instance_id: pdsState.instanceId,
+    category: cat,
+    name: item.name
+  }, 30000);
+
+  if (data && data.success) {
+    showToast(`🗑️ ${item.name} silindi.`, "success");
+    if (pdsState.drawerOpen) pdsCloseDrawer();
+    await pdsLoadContent(cat, true);
+    loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Dosya silinemedi."}`, "error");
+  }
+}
+
+// ---------- Mod detay çekmecesi ----------
+function pdsOpenDrawer(item, cat) {
+  const drawer = document.getElementById("pdsDrawer");
+  const backdrop = document.getElementById("pdsDrawerBackdrop");
+  const titleEl = document.getElementById("pdsDrawerTitle");
+  const bodyEl = document.getElementById("pdsDrawerBody");
+  if (!drawer || !bodyEl) return;
+
+  pdsState.drawerOpen = true;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  if (backdrop) backdrop.classList.add("show");
+
+  const displayName = (item.display_name && String(item.display_name).trim()) || cleanContentName(item.name);
+  if (titleEl) titleEl.textContent = displayName;
+  bodyEl.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth bilgisi yükleniyor...</span></div>`;
+
+  const local = { item: item, cat: cat };
+  if (item.slug) {
+    apiGet(`/api/modrinth/project?slug=${encodeURIComponent(item.slug)}`, 15000).then(data => {
+      if (!pdsState.drawerOpen) return;
+      if (data && data.success) {
+        pdsRenderProjectDrawer(data, local);
+      } else {
+        pdsRenderLocalDrawer(local, (data && data.error) || "Modrinth bilgisi alınamadı.");
+      }
+    });
+  } else {
+    pdsRenderLocalDrawer(local, "Bu içerik Modrinth kaydı olmadan (elle) kurulmuş.");
+  }
+}
+
+function pdsCloseDrawer() {
+  const drawer = document.getElementById("pdsDrawer");
+  const backdrop = document.getElementById("pdsDrawerBackdrop");
+  pdsState.drawerOpen = false;
+  if (drawer) {
+    drawer.classList.remove("open");
+    drawer.setAttribute("aria-hidden", "true");
+  }
+  if (backdrop) backdrop.classList.remove("show");
+}
+
+function pdsDrawerActions(item, cat) {
+  const dir = PDS_CAT_INFO[cat].dir;
+  const wrap = document.createElement("div");
+  wrap.className = "pds-drawer-actions";
+
+  if (item.source_url) {
+    const link = document.createElement("a");
+    link.className = "pds-btn pds-btn-primary";
+    link.href = item.source_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "🌐 Ana Sayfa";
+    wrap.appendChild(link);
+  }
+
+  const folderBtn = document.createElement("button");
+  folderBtn.type = "button";
+  folderBtn.className = "pds-btn";
+  folderBtn.textContent = "📂 Klasörü Aç";
+  folderBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${dir}`));
+  wrap.appendChild(folderBtn);
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "pds-btn pds-btn-danger";
+  delBtn.textContent = "🗑 Kaldır";
+  delBtn.addEventListener("click", () => pdsDeleteContent(cat, item));
+  wrap.appendChild(delBtn);
+
+  return wrap;
+}
+
+function pdsRenderProjectDrawer(data, local) {
+  const body = document.getElementById("pdsDrawerBody");
+  if (!body) return;
+  const titleEl = document.getElementById("pdsDrawerTitle");
+  if (titleEl) titleEl.textContent = data.title || local.item.name;
+
+  body.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "pds-drawer-head-card";
+
+  const iconBox = document.createElement("div");
+  iconBox.className = "pds-drawer-icon";
+  iconBox.textContent = PDS_CAT_INFO[local.cat].icon;
+  if (data.icon_url) {
+    const img = document.createElement("img");
+    img.src = data.icon_url;
+    img.alt = "";
+    img.addEventListener("error", () => { img.remove(); iconBox.textContent = PDS_CAT_INFO[local.cat].icon; });
+    iconBox.textContent = "";
+    iconBox.appendChild(img);
+  }
+
+  const headInfo = document.createElement("div");
+  headInfo.className = "pds-drawer-headinfo";
+  headInfo.innerHTML = `
+    <div class="pds-drawer-name">${pdsEsc(data.title)}</div>
+    <div class="pds-chips">${(data.categories || []).map(c => `<span class="pds-chip">${pdsEsc(c)}</span>`).join("")}</div>
+    <div class="pds-drawer-stats">⬇ ${Number(data.downloads || 0).toLocaleString()} indirme • ❤ ${Number(data.follows || 0).toLocaleString()} takipçi</div>
+  `;
+  head.appendChild(iconBox);
+  head.appendChild(headInfo);
+  body.appendChild(head);
+
+  const descTitle = document.createElement("h4");
+  descTitle.className = "pds-drawer-subtitle";
+  descTitle.textContent = "Açıklama";
+  body.appendChild(descTitle);
+
+  const desc = document.createElement("p");
+  desc.className = "pds-drawer-desc";
+  desc.textContent = data.description || "Açıklama bulunmuyor.";
+  body.appendChild(desc);
+
+  const versionsTitle = document.createElement("h4");
+  versionsTitle.className = "pds-drawer-subtitle";
+  versionsTitle.textContent = `Sürüm Geçmişi (${(data.versions || []).length})`;
+  body.appendChild(versionsTitle);
+
+  const vList = document.createElement("div");
+  vList.className = "pds-drawer-list";
+  (data.versions || []).slice(0, 15).forEach(v => {
+    const row = document.createElement("div");
+    row.className = "pds-drawer-ver";
+    const gvs = (v.game_versions || []).slice(0, 4).join(", ");
+    const loaders = (v.loaders || []).slice(0, 3).join(", ");
+    row.innerHTML = `
+      <span class="pds-drawer-ver-name">${pdsEsc(v.version_number || "?")}</span>
+      <span class="pds-drawer-ver-meta">${pdsEsc(gvs)}${loaders ? " • " + pdsEsc(loaders) : ""}</span>
+      <span class="pds-drawer-ver-date">${pdsEsc(String(v.date || "").slice(0, 10))}</span>
+    `;
+    vList.appendChild(row);
+  });
+  if (!(data.versions || []).length) {
+    vList.innerHTML = `<div class="pds-drawer-empty">Sürüm bilgisi yok.</div>`;
+  }
+  body.appendChild(vList);
+
+  const DEP_LABELS = { required: "Zorunlu", optional: "Opsiyonel", incompatible: "Uyumsuz", embedded: "Gömülü" };
+  const deps = data.dependencies || [];
+  const depTitle = document.createElement("h4");
+  depTitle.className = "pds-drawer-subtitle";
+  depTitle.textContent = `Bağımlılıklar (${deps.length})`;
+  body.appendChild(depTitle);
+
+  const depList = document.createElement("div");
+  depList.className = "pds-drawer-list";
+  deps.forEach(d => {
+    const row = document.createElement("div");
+    row.className = "pds-drawer-dep";
+    const dtype = d.dependency_type || "required";
+    row.innerHTML = `
+      <span class="pds-drawer-dep-name">${pdsEsc(d.name || d.project_id || "?")}</span>
+      <span class="pds-dep-type dep-${pdsEsc(dtype)}">${pdsEsc(DEP_LABELS[dtype] || dtype)}</span>
+    `;
+    depList.appendChild(row);
+  });
+  if (!deps.length) {
+    depList.innerHTML = `<div class="pds-drawer-empty">Bağımlılık yok.</div>`;
+  }
+  body.appendChild(depList);
+
+  body.appendChild(pdsDrawerActions({
+    name: local.item.name,
+    display_name: data.title,
+    source_url: data.source_url || ""
+  }, local.cat));
+}
+
+function pdsRenderLocalDrawer(local, note) {
+  const body = document.getElementById("pdsDrawerBody");
+  if (!body) return;
+  const item = local.item;
+  const info = PDS_CAT_INFO[local.cat];
+  const displayName = (item.display_name && String(item.display_name).trim()) || cleanContentName(item.name);
+
+  const sizeText = item.is_dir
+    ? "klasör"
+    : (item.size >= 1048576 ? `${(item.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((item.size || 0) / 1024))} KB`);
+
+  body.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "pds-drawer-local";
+  card.innerHTML = `
+    <div class="pds-drawer-local-name">${info.icon} ${pdsEsc(displayName)}</div>
+    <div class="pds-item-meta" style="margin-top:6px;">${pdsEsc(item.name)} • ${pdsEsc(sizeText)}${item.version ? " • v" + pdsEsc(item.version) : ""}</div>
+    <p class="pds-drawer-desc" style="margin-top:10px;">${pdsEsc(item.description || "Açıklama bulunmuyor.")}</p>
+    <p class="pds-soon-note">ℹ️ ${pdsEsc(note)}</p>
+  `;
+  body.appendChild(card);
+  body.appendChild(pdsDrawerActions(item, local.cat));
+}
+
+// ---------- Modrinth sekmesi ----------
+function pdsRenderModrinthTab(pane) {
+  const inst = pdsSyncInstance();
+  const loaderText = pdsLoaderLabel(inst ? inst.loader : "");
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">🔎 Modrinth</h3>
+        <p class="pds-section-sub">Arama bu profile göre filtrelenir: MC ${pdsEsc(inst ? inst.version : "?")} • ${pdsEsc(loaderText)}</p>
+      </div>
+    </div>
+    <div class="pds-mr-bar">
+      <select class="styled-select" id="pdsMrType" aria-label="İçerik türü">
+        <option value="mod">🧩 Modlar</option>
+        <option value="shader">✨ Shaderlar</option>
+        <option value="resourcepack">🎨 Doku Paketleri</option>
+      </select>
+      <input type="text" class="styled-input" id="pdsMrQuery" placeholder="Ara... (örn: sodium)" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn-primary-action" id="pdsMrSearchBtn">🔍 Ara</button>
+    </div>
+    <div class="pds-mr-grid" id="pdsMrResults"></div>
+  `;
+
+  const typeSel = document.getElementById("pdsMrType");
+  const input = document.getElementById("pdsMrQuery");
+  const btn = document.getElementById("pdsMrSearchBtn");
+
+  if (typeSel) {
+    typeSel.value = pdsState.modrinth.type;
+    typeSel.addEventListener("change", () => {
+      pdsState.modrinth.type = typeSel.value;
+      pdsState.modrinth.hits = [];
+      pdsState.modrinth.searched = false;
+      pdsRenderMrResults();
+    });
+  }
+  if (btn) btn.addEventListener("click", pdsSearchModrinth);
+  if (input) {
+    input.value = pdsState.modrinth.query || "";
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") pdsSearchModrinth(); });
+  }
+
+  pdsRenderMrResults();
+}
+
+async function pdsSearchModrinth() {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const input = document.getElementById("pdsMrQuery");
+  const typeSel = document.getElementById("pdsMrType");
+  const q = input ? input.value.trim() : "";
+  const type = typeSel ? typeSel.value : "mod";
+  pdsState.modrinth.type = type;
+  pdsState.modrinth.query = q;
+  pdsState.modrinth.loading = true;
+
+  const wrap = document.getElementById("pdsMrResults");
+  if (wrap) wrap.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
+
+  const params = new URLSearchParams({
+    q: q,
+    type: type,
+    version: inst.version || "",
+    loader: String(inst.loader || "").toLowerCase() === "vanilla" ? "Tümü" : (inst.loader || ""),
+    sort: "downloads",
+    limit: 20,
+    offset: 0
+  });
+
+  const data = await apiGet(`/api/modrinth/search?${params.toString()}`, 20000);
+  pdsState.modrinth.loading = false;
+
+  if (!data || data.error || !Array.isArray(data.hits)) {
+    pdsState.modrinth.hits = [];
+    pdsState.modrinth.searched = true;
+    pdsRenderMrResults((data && data.error) || "Modrinth yanıt vermedi.");
+    return;
+  }
+
+  pdsState.modrinth.hits = data.hits;
+  pdsState.modrinth.searched = true;
+  pdsRenderMrResults();
+}
+
+function pdsRenderMrResults(errorMsg) {
+  const wrap = document.getElementById("pdsMrResults");
+  if (!wrap) return;
+
+  if (pdsState.modrinth.loading) {
+    wrap.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
+    return;
+  }
+  if (errorMsg) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc(errorMsg)}</div>`;
+    return;
+  }
+  if (!pdsState.modrinth.searched) {
+    wrap.innerHTML = `<div class="pds-empty">Aramak için bir şeyler yazın ve türü seçin.</div>`;
+    return;
+  }
+
+  const hits = pdsState.modrinth.hits || [];
+  if (hits.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">Aradığınız kriterlere uygun içerik bulunamadı.</div>`;
+    return;
+  }
+
+  const cat = contentCategoryFromType(pdsState.modrinth.type);
+  const info = PDS_CAT_INFO[cat];
+  wrap.innerHTML = "";
+
+  hits.forEach(hit => {
+    const card = document.createElement("div");
+    card.className = "pds-mr-card";
+
+    const icon = document.createElement("div");
+    icon.className = "pds-mr-icon";
+    icon.textContent = info.icon;
+    if (hit.icon_url) {
+      const img = document.createElement("img");
+      img.src = hit.icon_url;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => { img.remove(); icon.textContent = info.icon; });
+      icon.textContent = "";
+      icon.appendChild(img);
+    }
+
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "pds-mr-body";
+    bodyEl.innerHTML = `
+      <div class="pds-mr-title" title="${pdsEsc(hit.title)}">${pdsEsc(hit.title || hit.slug)}</div>
+      <div class="pds-mr-desc">${pdsEsc(hit.description || "")}</div>
+      <div class="pds-mr-meta">⬇ ${Number(hit.downloads || 0).toLocaleString()}${hit.author ? " • " + pdsEsc(hit.author) : ""}</div>
+    `;
+
+    const installBtn = document.createElement("button");
+    installBtn.type = "button";
+    installBtn.className = "pds-btn pds-btn-primary";
+    installBtn.textContent = "⚡ Kur";
+    installBtn.addEventListener("click", () => pdsInstallSearchHit(hit, installBtn));
+
+    card.appendChild(icon);
+    card.appendChild(bodyEl);
+    card.appendChild(installBtn);
+    wrap.appendChild(card);
+  });
+}
+
+async function pdsInstallSearchHit(hit, buttonEl) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const cat = contentCategoryFromType(pdsState.modrinth.type);
+  if (cat === "mod" && String(inst.loader || "").toLowerCase() === "vanilla") {
+    showToast("Vanilla profil mod yüklemez. Fabric/Forge profili kullanın.", "info");
+    return;
+  }
+
+  const original = buttonEl ? buttonEl.textContent : "";
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+  showToast(`📥 ${hit.title || hit.slug} → "${inst.name}" profiline indiriliyor...`, "info");
+
+  const payload = {
+    slug: hit.slug,
+    version: inst.version,
+    loader: inst.loader,
+    instance_id: pdsState.instanceId,
+    project_type: cat,
+    force: false
+  };
+  const data = await apiPost("/api/modrinth/install", payload, 180000);
+
+  if (data && data.needs_confirm) {
+    if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "⚡ Kur"; }
+    const ok = await showConfirmDialog({
+      icon: "⚠️",
+      title: "Sürüm Tam Eşleşmiyor",
+      message: `${data.message || "Bu paket sürümünüzle tam eşleşmiyor olabilir."} Yine de indirmek ister misiniz?`,
+      okText: "Yine de İndir"
+    });
+    if (ok) {
+      if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+      const forced = await apiPost("/api/modrinth/install", Object.assign({}, payload, { force: true }), 180000);
+      pdsHandleInstallResult(forced, buttonEl, original, cat);
+    }
+    return;
+  }
+  pdsHandleInstallResult(data, buttonEl, original, cat);
+}
+
+async function pdsHandleInstallResult(data, buttonEl, original, cat) {
+  if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "⚡ Kur"; }
+
+  if (data && data.success) {
+    showToast(`✓ ${data.filename || "İçerik"} profile kuruldu.`, "success");
+    if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "✓ Yüklü"; }
+    await pdsLoadContent(cat, true);
+    loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Kurulum tamamlanamadı."}`, "error");
+  }
+}
+
+// ---------- Sürüm sekmesi ----------
+function pdsRenderVersionTab(pane) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">🧱 Sürüm Bilgisi</h3>
+        <p class="pds-section-sub">Sürüm/yükleyici değiştirme Faz 2'de; şimdilik bilgileri görüntüleyin ve profili düzenleyin.</p>
+      </div>
+    </div>
+    <div class="pds-info-grid">
+      <div class="pds-info-card"><span class="pds-info-label">Minecraft Sürümü</span><span class="pds-info-value">${pdsEsc(inst.version || "?")}</span></div>
+      <div class="pds-info-card"><span class="pds-info-label">Yükleyici</span><span class="pds-info-value">${pdsEsc(pdsLoaderLabel(inst.loader))}</span></div>
+      <div class="pds-info-card"><span class="pds-info-label">Yükleyici Sürümü</span><span class="pds-info-value">${pdsEsc(inst.loader_version || "Otomatik / Bilinmiyor")}</span></div>
+      <div class="pds-info-card"><span class="pds-info-label">Oluşturma Tarihi</span><span class="pds-info-value">${pdsEsc(inst.created_at || "—")}</span></div>
+      <div class="pds-info-card"><span class="pds-info-label">Mod Sayısı</span><span class="pds-info-value">${inst.mod_count || 0}</span></div>
+    </div>
+
+    <h3 class="pds-section-title pds-sub-head">✏️ Profili Düzenle</h3>
+    <div class="pds-form">
+      <div class="pds-field">
+        <label>Profil Adı</label>
+        <input type="text" class="styled-input" id="pdsVersionName" value="${pdsEsc(inst.name || "")}" autocomplete="off">
+      </div>
+      <div class="pds-field">
+        <label>Profil İkonu (URL)</label>
+        <input type="text" class="styled-input" id="pdsVersionIcon" placeholder="https://.../ikon.png" value="${pdsEsc(inst.icon || "")}" autocomplete="off" spellcheck="false">
+      </div>
+      <button type="button" class="btn-primary-action" id="pdsVersionSave">💾 Kaydet</button>
+    </div>
+  `;
+
+  const save = document.getElementById("pdsVersionSave");
+  if (save) save.addEventListener("click", () => pdsSaveProfileForm("pdsVersionName", "pdsVersionIcon", save));
+}
+
+// ---------- Ayarlar sekmesi ----------
+function pdsRenderSettingsTab(pane) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">⚙️ Ayarlar</h3>
+        <p class="pds-section-sub">Profil kimliğini düzenleyin, klasörü açın veya profili silin.</p>
+      </div>
+    </div>
+    <div class="pds-form">
+      <div class="pds-field">
+        <label>Profil Adı</label>
+        <input type="text" class="styled-input" id="pdsSettingsName" value="${pdsEsc(inst.name || "")}" autocomplete="off">
+      </div>
+      <div class="pds-field">
+        <label>Profil İkonu (URL)</label>
+        <input type="text" class="styled-input" id="pdsSettingsIcon" placeholder="https://.../ikon.png" value="${pdsEsc(inst.icon || "")}" autocomplete="off" spellcheck="false">
+      </div>
+      <button type="button" class="btn-primary-action" id="pdsSettingsSave">💾 Kaydet</button>
+    </div>
+
+    <div class="pds-danger-zone">
+      <div class="pds-danger-text">
+        <strong>Profil klasörü</strong>
+        <span>Modlar, dünyalar ve ayarlar bu klasörde saklanır.</span>
+      </div>
+      <button type="button" class="btn-secondary" id="pdsOpenFolderBtn">📂 Klasörü Aç</button>
+    </div>
+
+    <div class="pds-danger-zone pds-danger-red">
+      <div class="pds-danger-text">
+        <strong>Profili Sil</strong>
+        <span>Profil ve tüm içeriği kalıcı olarak silinir. Bu işlem geri alınamaz.</span>
+      </div>
+      <button type="button" class="pds-btn pds-btn-danger pds-btn-lg" id="pdsDeleteProfileBtn">🗑 Profili Sil</button>
+    </div>
+  `;
+
+  const save = document.getElementById("pdsSettingsSave");
+  if (save) save.addEventListener("click", () => pdsSaveProfileForm("pdsSettingsName", "pdsSettingsIcon", save));
+
+  const folderBtn = document.getElementById("pdsOpenFolderBtn");
+  if (folderBtn) folderBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}`));
+
+  const deleteBtn = document.getElementById("pdsDeleteProfileBtn");
+  if (deleteBtn) deleteBtn.addEventListener("click", pdsDeleteCurrentProfile);
+}
+
+async function pdsSaveProfileForm(nameId, iconId, buttonEl) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const nameEl = document.getElementById(nameId);
+  const iconEl = document.getElementById(iconId);
+  const name = nameEl ? nameEl.value.trim() : "";
+  if (!name) {
+    showToast("Profil adı boş olamaz.", "error");
+    return;
+  }
+
+  const original = buttonEl ? buttonEl.textContent : "";
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kaydediliyor..."; }
+
+  const data = await apiPost("/api/instances/update", {
+    id: pdsState.instanceId,
+    name: name,
+    icon: iconEl ? iconEl.value.trim() : ""
+  }, 12000);
+
+  if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "💾 Kaydet"; }
+
+  if (data && data.success) {
+    showToast("✓ Profil güncellendi.", "success");
+    await loadInstances();
+    pdsSyncInstance();
+    pdsRenderHeader();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Profil güncellenemedi."}`, "error");
+  }
+}
+
+async function pdsDeleteCurrentProfile() {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const ok = await showConfirmDialog({
+    icon: "🗑️",
+    title: "Profil Silinsin mi?",
+    message: `"${inst.name}" profili ve içindeki tüm mod, dünya ve ayarlar kalıcı olarak silinecek. Emin misiniz?`,
+    okText: "Profili Sil",
+    danger: true
+  });
+  if (!ok) return;
+
+  const data = await apiPost("/api/instances/delete", { id: pdsState.instanceId }, 30000);
+  if (data && data.success) {
+    showToast(`🗑️ "${inst.name}" profili silindi.`, "success");
+    closeProfileDetail();
+    await loadInstances();
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Profil silinemedi."}`, "error");
+  }
+}
+
+// ---------- Minecraft Günlüğü sekmesi ----------
+function pdsRenderLogsTab(pane) {
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">📜 Minecraft Günlüğü</h3>
+        <p class="pds-section-sub">Launcher ve oyunun son günlük kayıtları.</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsLogsRefresh">↻ Yenile</button>
+        <button type="button" class="btn-secondary" id="pdsLogsClear">Temizle</button>
+      </div>
+    </div>
+    <pre class="pds-log" id="pdsLogOut">Günlük yükleniyor...</pre>
+  `;
+
+  const out = document.getElementById("pdsLogOut");
+  const load = async () => {
+    if (!out) return;
+    const data = await apiGet("/api/logs", 8000);
+    const logs = (data && Array.isArray(data.logs)) ? data.logs : [];
+    out.textContent = logs.length ? logs.join("\n") : "Günlük kaydı yok.";
+    out.scrollTop = out.scrollHeight;
+  };
+
+  const refresh = document.getElementById("pdsLogsRefresh");
+  if (refresh) refresh.addEventListener("click", load);
+
+  const clear = document.getElementById("pdsLogsClear");
+  if (clear) clear.addEventListener("click", () => { if (out) out.textContent = "Günlük görünümü temizlendi.\n"; });
+
+  load();
+}
+
+// ---------- Faz 2/3 sekmeleri ("Yakında") ----------
+function pdsRenderSoonTab(pane, tabId) {
+  const info = PDS_SOON_TABS[tabId] || { label: "Yakında", icon: "🧭", folder: "", desc: "" };
+  pane.innerHTML = `
+    <div class="pds-soon">
+      <div class="pds-soon-icon">${info.icon}</div>
+      <h3 class="pds-soon-title">${pdsEsc(info.label)} — Yakında</h3>
+      <p class="pds-soon-desc">${pdsEsc(info.desc)}</p>
+      <button type="button" class="btn-secondary" id="pdsSoonFolder">📂 Klasörü Aç</button>
+    </div>
+  `;
+  const btn = document.getElementById("pdsSoonFolder");
+  if (btn) {
+    btn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${info.folder}`));
+  }
 }

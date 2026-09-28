@@ -120,7 +120,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 10
+API_VERSION = 11
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -959,6 +959,122 @@ def fetch_modrinth_versions(slug):
     return []
 
 
+# Profil detay cekmecesi icin proje detay onbellegi (LRU + TTL, disk yazimi yok)
+_PROJECT_DETAIL_CACHE = OrderedDict()
+_PROJECT_DETAIL_LOCK = threading.Lock()
+_PROJECT_DETAIL_TTL = 600.0
+_PROJECT_DETAIL_MAX = 120
+
+
+def fetch_modrinth_project_detail(slug):
+    """Modrinth projesinin detayli bilgisini (surumler + bagimliliklar) dondurur."""
+    safe_slug = re.sub(r"[^a-zA-Z0-9\-_]", "", str(slug or ""))
+    if not safe_slug:
+        return {"success": False, "error": "Geçersiz proje kimliği."}
+
+    now = time.time()
+    with _PROJECT_DETAIL_LOCK:
+        hit = _PROJECT_DETAIL_CACHE.get(safe_slug)
+        if hit and (now - hit[0]) < _PROJECT_DETAIL_TTL:
+            _PROJECT_DETAIL_CACHE.move_to_end(safe_slug)
+            return hit[1]
+
+    try:
+        resp = requests.get(
+            f"{ModrinthFetcher.BASE_URL}/project/{safe_slug}",
+            headers=ModrinthFetcher.HEADERS,
+            timeout=8,
+        )
+        project = resp.json() if resp.status_code == 200 else {}
+        if not isinstance(project, dict) or not project:
+            msg = f"Modrinth proje bilgisi alınamadı (HTTP {resp.status_code})."
+            set_net_error("modrinth_project", Exception(msg))
+            log_error(f"Modrinth proje detayı hatası ({safe_slug}): {msg}")
+            return {"success": False, "error": msg}
+
+        v_resp = requests.get(
+            f"{ModrinthFetcher.BASE_URL}/project/{safe_slug}/version",
+            headers=ModrinthFetcher.HEADERS,
+            timeout=8,
+        )
+        raw_versions = v_resp.json() if v_resp.status_code == 200 else []
+        if not isinstance(raw_versions, list):
+            raw_versions = []
+
+        versions = []
+        for v in raw_versions[:40]:
+            versions.append({
+                "version_number": v.get("version_number") or v.get("name") or "",
+                "game_versions": [str(g) for g in (v.get("game_versions") or [])],
+                "loaders": [str(l).lower() for l in (v.get("loaders") or [])],
+                "date": v.get("date_published") or "",
+            })
+
+        # Bagimlilik adlarini en yeni surumden topla, gerekiyorsa toplu sorgula
+        latest_deps = (raw_versions[0].get("dependencies") or []) if raw_versions else []
+        dep_ids = []
+        for dep in latest_deps:
+            pid = dep.get("project_id")
+            if pid and pid not in dep_ids:
+                dep_ids.append(pid)
+
+        dep_names = {}
+        for i in range(0, min(len(dep_ids), 60), 20):
+            batch = dep_ids[i:i + 20]
+            try:
+                b = requests.get(
+                    f"{ModrinthFetcher.BASE_URL}/projects",
+                    params={"ids": json.dumps(batch)},
+                    headers=ModrinthFetcher.HEADERS,
+                    timeout=8,
+                )
+                if b.status_code == 200:
+                    for item in (b.json() or []):
+                        if isinstance(item, dict):
+                            dep_names[item.get("id")] = item.get("title") or item.get("slug") or ""
+            except Exception:
+                pass
+
+        dependencies = []
+        seen = set()
+        for dep in latest_deps:
+            pid = dep.get("project_id") or ""
+            dtype = dep.get("dependency_type") or "required"
+            key = (pid, dtype)
+            if key in seen:
+                continue
+            seen.add(key)
+            dependencies.append({
+                "name": dep_names.get(pid) or dep.get("file_name") or pid or "Bilinmeyen",
+                "project_id": pid,
+                "dependency_type": dtype,
+            })
+
+        summary = {
+            "success": True,
+            "slug": safe_slug,
+            "title": project.get("title") or safe_slug,
+            "description": project.get("body") or project.get("description") or "",
+            "categories": [str(c) for c in (project.get("categories") or [])],
+            "icon_url": project.get("icon_url") or "",
+            "downloads": project.get("downloads", 0),
+            "follows": project.get("followers", 0),
+            "source_url": project.get("source_url") or "",
+            "versions": versions,
+            "dependencies": dependencies,
+        }
+    except Exception as e:
+        set_net_error("modrinth_project", e)
+        log_error(f"Modrinth proje detayı başarısız ({safe_slug}): {type(e).__name__}: {e}")
+        return {"success": False, "error": f"Modrinth bağlantı hatası: {type(e).__name__}: {e}"}
+
+    with _PROJECT_DETAIL_LOCK:
+        _PROJECT_DETAIL_CACHE[safe_slug] = (time.time(), summary)
+        while len(_PROJECT_DETAIL_CACHE) > _PROJECT_DETAIL_MAX:
+            _PROJECT_DETAIL_CACHE.popitem(last=False)
+    return summary
+
+
 def pick_modpack_version(versions, preferred_game_version=""):
     preferred = clean_minecraft_version(preferred_game_version) if preferred_game_version else ""
     candidates = []
@@ -1267,17 +1383,23 @@ def get_instance_content(inst_id):
             try:
                 for f in sorted(os.listdir(folder)):
                     fp = os.path.join(folder, f)
-                    if not os.path.isfile(fp):
+                    is_dir = os.path.isdir(fp)
+                    if not is_dir and not os.path.isfile(fp):
                         continue
                     try:
                         st = os.stat(fp)
                     except OSError:
                         continue
 
-                    slug, version = by_filename.get(f.lower(), ("", ""))
+                    # Devre disi icerikler <ad>.disabled olarak durur
+                    enabled = not f.lower().endswith(".disabled")
+                    base_name = f[:-len(".disabled")] if not enabled else f
+                    slug, version = by_filename.get(base_name.lower(), ("", ""))
 
                     item = {
                         "name": f,
+                        "enabled": enabled,
+                        "is_dir": is_dir,
                         "size": st.st_size,
                         "mtime": st.st_mtime,
                         "slug": slug,
@@ -1289,7 +1411,8 @@ def get_instance_content(inst_id):
                     }
 
                     # Mod ve doku paketlerinde gorunen ad / ikon bilgisini dosyadan cikar
-                    if f.lower().endswith((".jar", ".zip")):
+                    # (devre disi olsa bile zip okunabilir; temel ad uzerinden bakilir)
+                    if (not is_dir) and base_name.lower().endswith((".jar", ".zip")):
                         meta = read_content_metadata(fp, cat)
                         item["display_name"] = meta.get("display_name", "")
                         item["mod_id"] = meta.get("mod_id", "")
@@ -1320,21 +1443,70 @@ def delete_instance_content(inst_id, category, name):
 
     cat = normalize_category(category)
     target = os.path.join(inst_dir, CATEGORY_DIRS[cat], safe)
-    if not os.path.isfile(target):
+    if os.path.isdir(target):
+        try:
+            shutil.rmtree(target)
+        except Exception as e:
+            return False, f"Klasör silinemedi: {e}"
+    elif os.path.isfile(target):
+        try:
+            os.remove(target)
+        except Exception as e:
+            return False, f"Dosya silinemedi: {e}"
+    else:
         return False, "Dosya bulunamadı."
-
-    try:
-        os.remove(target)
-    except Exception as e:
-        return False, f"Dosya silinemedi: {e}"
 
     data = load_content_manifest(inst_id)
     entries = data.get(cat) or {}
+    safe_lower = safe.lower()
+    base_lower = safe_lower[:-len(".disabled")] if safe_lower.endswith(".disabled") else safe_lower
     for slug in [s for s, e in entries.items()
-                 if isinstance(e, dict) and str(e.get("filename", "")).lower() == safe.lower()]:
+                 if isinstance(e, dict) and str(e.get("filename", "")).lower() in (safe_lower, base_lower)]:
         entries.pop(slug, None)
     save_content_manifest(inst_id, data)
     return True, safe
+
+
+def toggle_instance_content(inst_id, category, name):
+    """Icerigi etkinlestirir/devre disi birakir: <ad> <-> <ad>.disabled.
+
+    Mod, doku paketi ve shader dosyalari ile shader klasorlerini destekler.
+    Donen: (basarili, dosya_adi_veya_hata, etkin_mi)
+    """
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return False, "Profil bulunamadı.", False
+
+    raw_name = str(name or "").strip()
+    safe = os.path.basename(raw_name)
+    if not safe or safe != raw_name or safe in (".", ".."):
+        return False, "Geçersiz dosya adı.", False
+
+    cat = normalize_category(category)
+    folder = os.path.join(inst_dir, CATEGORY_DIRS[cat])
+    src = os.path.join(folder, safe)
+    if not os.path.exists(src):
+        return False, "İçerik bulunamadı.", False
+
+    try:
+        if safe.lower().endswith(".disabled"):
+            target_name = safe[:-len(".disabled")]
+            if not target_name:
+                return False, "Geçersiz dosya adı.", False
+            target = os.path.join(folder, target_name)
+            if os.path.exists(target):
+                return False, f"'{target_name}' zaten etkin.", False
+            os.rename(src, target)
+            return True, target_name, True
+
+        target_name = safe + ".disabled"
+        target = os.path.join(folder, target_name)
+        if os.path.exists(target):
+            return False, f"'{target_name}' zaten devre dışı.", False
+        os.rename(src, target)
+        return True, target_name, False
+    except Exception as e:
+        return False, f"İçerik güncellenemedi: {e}", False
 
 
 def get_instance_mod_manifest(inst_id):
@@ -1907,7 +2079,8 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "version": "2.0.0",
                     "api_version": API_VERSION,
                     "features": ["instances", "modpack", "instance_mods", "content_manage",
-                                 "content_icons", "loader_versions", "net_test"],
+                                 "content_icons", "loader_versions", "net_test",
+                                 "profile_detail", "content_toggle"],
                 })
                 return
 
@@ -2007,7 +2180,16 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(res)
                 return
 
-            # 4b. Modrinth Surum Uyum Kontrolu (shader/doku icin yumusak)
+            # 4b. Modrinth Proje Detayi (profil detay cekmecesi)
+            if path == "/modrinth/project":
+                slug = (query.get("slug", [""])[0] or "").strip()
+                if not slug:
+                    self.send_json({"success": False, "error": "slug gerekli"})
+                    return
+                self.send_json(fetch_modrinth_project_detail(slug))
+                return
+
+            # 4c. Modrinth Surum Uyum Kontrolu (shader/doku icin yumusak)
             if path == "/modrinth/check":
                 slug = query.get("slug", [""])[0].strip()
                 gv = query.get("version", [""])[0]
@@ -2074,7 +2256,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
 
             # 6c. Profildeki Tum Icerik (mod / shader / doku paketi)
             if path == "/instances/content":
-                inst_id = query.get("instance_id", [""])[0]
+                inst_id = query.get("instance_id", [""])[0] or query.get("instance", [""])[0]
                 self.send_json({
                     "success": True,
                     "instance_id": inst_id,
@@ -2084,7 +2266,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
 
             # 6d. Icerik Ikonu (jar/zip icinden cikarilir)
             if path == "/instances/content/icon":
-                inst_id = query.get("instance_id", [""])[0]
+                inst_id = query.get("instance_id", [""])[0] or query.get("instance", [""])[0]
                 category = query.get("category", ["mod"])[0]
                 raw_name = query.get("name", [""])[0].strip()
                 safe = os.path.basename(raw_name)
@@ -2473,6 +2655,20 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 if ok:
                     add_log(f"🗑️ İçerik silindi ({normalize_category(category)}): {msg}")
                     self.send_json({"success": True, "deleted": msg})
+                else:
+                    self.send_json({"success": False, "error": msg})
+                return
+
+            # 7c. Profil Icerigi Ac/Kapa (<ad> <-> <ad>.disabled)
+            if path in ("/instances/content/toggle", "/instances/content/toggle/"):
+                inst_id = body.get("instance") or body.get("instance_id")
+                category = body.get("category") or "mod"
+                name = body.get("name")
+                ok, msg, enabled = toggle_instance_content(inst_id, category, name)
+                if ok:
+                    action = "etkinleştirildi" if enabled else "devre dışı bırakıldı"
+                    add_log(f"🔁 İçerik {action}: {msg}")
+                    self.send_json({"success": True, "name": msg, "enabled": enabled})
                 else:
                     self.send_json({"success": False, "error": msg})
                 return

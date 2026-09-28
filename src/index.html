@@ -273,6 +273,51 @@
     </main>
   </div>
 
+  <!-- =================== TAM EKRAN: PROFİL DETAY (FAZ 1) =================== -->
+  <div class="pds-screen" id="profileDetailScreen" style="display: none;" aria-hidden="true">
+    <!-- ÜST BAŞLIK -->
+    <header class="pds-header">
+      <button class="pds-back" id="pdsBackBtn" title="Geri (ESC)">←</button>
+      <div class="pds-head-icon" id="pdsHeadIcon">🗂️</div>
+      <div class="pds-head-info">
+        <h2 class="pds-head-name" id="pdsHeadName">Profil</h2>
+        <p class="pds-head-meta" id="pdsHeadMeta">MC ? • ? • 0 mod</p>
+      </div>
+      <button class="btn-secondary pds-close" id="pdsCloseBtn">✕ Kapat</button>
+    </header>
+
+    <div class="pds-body">
+      <!-- SOL DİKEY MENÜ: 12 sekme -->
+      <aside class="pds-sidebar" role="tablist" aria-label="Profil detay sekmeleri">
+        <button type="button" class="pds-side-tab" data-pds-tab="logs"><span class="pds-side-icon">📜</span><span>Minecraft Günlüğü</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="version"><span class="pds-side-icon">🧱</span><span>Sürüm</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="modrinth"><span class="pds-side-icon">🔎</span><span>Modrinth</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="mods"><span class="pds-side-icon">🧩</span><span>Modlar</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="resourcepack"><span class="pds-side-icon">🎨</span><span>Kaynak Paketleri</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="shader"><span class="pds-side-icon">✨</span><span>Shader Paketleri</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="notes"><span class="pds-side-icon">📝</span><span>Notlar</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="worlds"><span class="pds-side-icon">🌍</span><span>Dünyalar</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="servers"><span class="pds-side-icon">🌐</span><span>Sunucular</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="screenshots"><span class="pds-side-icon">📸</span><span>Ekran Görüntüleri</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="settings"><span class="pds-side-icon">⚙️</span><span>Ayarlar</span></button>
+        <button type="button" class="pds-side-tab" data-pds-tab="others"><span class="pds-side-icon">🗄️</span><span>Diğer Kayıtlar</span></button>
+      </aside>
+
+      <!-- SAĞ İÇERİK ALANI -->
+      <section class="pds-content" id="pdsContent"></section>
+    </div>
+
+    <!-- MOD DETAY ÇEKMECESİ -->
+    <div class="pds-drawer-backdrop" id="pdsDrawerBackdrop"></div>
+    <aside class="pds-drawer" id="pdsDrawer" aria-hidden="true">
+      <div class="pds-drawer-head">
+        <span class="pds-drawer-title" id="pdsDrawerTitle">Detay</span>
+        <button class="btn-close-modal" id="pdsDrawerClose" title="Kapat">✕</button>
+      </div>
+      <div class="pds-drawer-body" id="pdsDrawerBody"></div>
+    </aside>
+  </div>
+
   <!-- =================== MODAL: YENİ PROFİL (SEKMELİ YENİ ARAYÜZ) =================== -->
   <div class="modal-backdrop" id="createInstanceModal" style="display: none;">
     <div class="modal-window create-instance-modal np-modal">
