@@ -13,8 +13,11 @@ import sys
 import json
 import re
 import time
+import gzip
+import struct
 import shutil
 import socket
+import mimetypes
 import threading
 import subprocess
 import traceback
@@ -120,7 +123,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 12
+API_VERSION = 13
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -1050,6 +1053,14 @@ def fetch_modrinth_project_detail(slug):
                 "dependency_type": dtype,
             })
 
+        gallery = []
+        for g in (project.get("gallery") or []):
+            url = g.get("url") if isinstance(g, dict) else g
+            if isinstance(url, str) and url.startswith("http"):
+                gallery.append(url)
+                if len(gallery) >= 12:
+                    break
+
         summary = {
             "success": True,
             "slug": safe_slug,
@@ -1060,6 +1071,7 @@ def fetch_modrinth_project_detail(slug):
             "downloads": project.get("downloads", 0),
             "follows": project.get("followers", 0),
             "source_url": project.get("source_url") or "",
+            "gallery": gallery,
             "versions": versions,
             "dependencies": dependencies,
         }
@@ -2481,6 +2493,320 @@ def run_game_background_task(params):
         )
 
 
+# ==================== FAZ 3/4: PROFIL VARLIKLARI (NOT/DUNYA/SUNUCU/GORUNTU/KAYIT) ====================
+ASSET_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+ASSET_LOG_EXTS = (".log", ".txt")
+LOG_DIRS = ("logs", "crash-reports")
+NOTE_MAX_CHARS = 200000
+NOTE_FILENAME = "note.txt"
+
+
+def _safe_asset_path(base_dir, raw_name, allowed_exts=None):
+    """base_dir altindaki TEK dosyayi dogrular (path traversal korumali).
+
+    `..`, mutlak yol, alt klasor ve beyaz listede olmayan uzantilar reddedilir.
+    """
+    raw = str(raw_name or "")
+    if not raw or raw in (".", "..") or raw != os.path.basename(raw):
+        return None
+    if "\x00" in raw or os.path.isabs(raw):
+        return None
+    base = os.path.abspath(base_dir)
+    fp = os.path.abspath(os.path.join(base, raw))
+    if not fp.startswith(base + os.sep):
+        return None
+    if allowed_exts and not fp.lower().endswith(tuple(allowed_exts)):
+        return None
+    return fp
+
+
+def _safe_world_dir(inst_dir, raw_world):
+    """Profilin saves/ klasoru altindaki dunya klasorunu dogrular."""
+    if not inst_dir:
+        return None
+    saves = os.path.abspath(os.path.join(inst_dir, "saves"))
+    wd = _safe_asset_path(saves, raw_world)
+    if not wd or os.path.islink(wd) or not os.path.isdir(wd):
+        return None
+    return wd
+
+
+# --- Minimal NBT okuyucu (servers.dat icin; gzip + Compound/List/String yeterli) ---
+_NBT_MAX_LIST = 200000
+
+
+def _nbt_payload(f, tag_id):
+    """Bir NBT etiketinin govdesini okur. Bilinmeyen turlerde None doner."""
+    if tag_id == 1:
+        return struct.unpack(">b", f.read(1))[0]
+    if tag_id == 2:
+        return struct.unpack(">h", f.read(2))[0]
+    if tag_id == 3:
+        return struct.unpack(">i", f.read(4))[0]
+    if tag_id == 4:
+        return struct.unpack(">q", f.read(8))[0]
+    if tag_id == 5:
+        return struct.unpack(">f", f.read(4))[0]
+    if tag_id == 6:
+        return struct.unpack(">d", f.read(8))[0]
+    if tag_id == 7:
+        n = struct.unpack(">i", f.read(4))[0]
+        return f.read(max(0, min(n, 4 * 1024 * 1024)))
+    if tag_id == 8:
+        n = struct.unpack(">H", f.read(2))[0]
+        return f.read(n).decode("utf-8", errors="replace")
+    if tag_id == 9:
+        item_type = struct.unpack(">b", f.read(1))[0]
+        n = max(0, min(struct.unpack(">i", f.read(4))[0], _NBT_MAX_LIST))
+        return [_nbt_payload(f, item_type) for _ in range(n)]
+    if tag_id == 10:
+        data = {}
+        while True:
+            child = struct.unpack(">b", f.read(1))[0]
+            if child == 0:
+                break
+            key = _nbt_payload(f, 8)
+            data[str(key)] = _nbt_payload(f, child)
+        return data
+    if tag_id == 11:
+        n = max(0, min(struct.unpack(">i", f.read(4))[0], _NBT_MAX_LIST))
+        return list(struct.unpack(f">{n}i", f.read(4 * n)))
+    if tag_id == 12:
+        n = max(0, min(struct.unpack(">i", f.read(4))[0], _NBT_MAX_LIST))
+        return list(struct.unpack(f">{n}q", f.read(8 * n)))
+    return None
+
+
+def read_nbt_file(path):
+    """NBT dosyasini (once gzip, sonra ham) ayristirir; hata olursa None doner."""
+    def _parse_stream(f):
+        first = f.read(1)
+        if not first:
+            return None
+        tag = struct.unpack(">b", first)[0]
+        if tag != 10:
+            return None
+        _nbt_payload(f, 8)  # kok etiket adi (genelde bos)
+        return _nbt_payload(f, 10)
+
+    try:
+        with gzip.open(path, "rb") as f:
+            parsed = _parse_stream(f)
+        if parsed is not None:
+            return parsed
+    except Exception:
+        pass
+    try:
+        with open(path, "rb") as f:
+            return _parse_stream(f)
+    except Exception:
+        return None
+
+
+def read_servers_dat(path):
+    """servers.dat -> [{name, ip}]. Bozuk/eksik dosyada bos liste doner."""
+    root = read_nbt_file(path)
+    if not isinstance(root, dict):
+        return []
+    raw = root.get("servers")
+    if not isinstance(raw, list):
+        return []
+    servers = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        ip = item.get("ip")
+        if isinstance(name, str) and isinstance(ip, str) and ip:
+            servers.append({"name": name, "ip": ip})
+    return servers
+
+
+def list_instance_worlds(inst_id):
+    """saves/ altindaki dunyalari listeler; profil yoksa None doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not os.path.isdir(inst_dir):
+        return None
+    saves = os.path.join(inst_dir, "saves")
+    worlds = []
+    if os.path.isdir(saves):
+        for name in sorted(os.listdir(saves), key=lambda s: s.lower()):
+            wd = os.path.join(saves, name)
+            if os.path.islink(wd) or not os.path.isdir(wd):
+                continue
+            total = 0
+            for root, dirs, files in os.walk(wd):
+                dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+                for fn in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, fn))
+                    except Exception:
+                        pass
+            level = os.path.join(wd, "level.dat")
+            try:
+                last = os.path.getmtime(level) if os.path.isfile(level) else os.path.getmtime(wd)
+            except Exception:
+                last = 0
+            worlds.append({
+                "name": name,
+                "size_mb": round(total / 1048576.0, 2),
+                "last_played": time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "",
+                "has_icon": os.path.isfile(os.path.join(wd, "icon.png")),
+            })
+    return worlds
+
+
+def copy_instance_world(inst_id, world_name):
+    """Dunyayi 'name (kopya)' adiyla kopyalar. (basari, ad/hata) doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return False, "Profil bulunamadı."
+    wd = _safe_world_dir(inst_dir, world_name)
+    if not wd:
+        return False, "Geçersiz dünya adı."
+    saves = os.path.join(inst_dir, "saves")
+    base_new = f"{os.path.basename(wd)} (kopya)"
+    target_name = base_new
+    i = 2
+    while os.path.exists(os.path.join(saves, target_name)):
+        target_name = f"{base_new} {i}"
+        i += 1
+        if i > 999:
+            return False, "Kopya adı üretilemedi."
+    try:
+        shutil.copytree(wd, os.path.join(saves, target_name))
+    except Exception as e:
+        return False, f"Kopyalanamadı: {e}"
+    return True, target_name
+
+
+def delete_instance_world(inst_id, world_name):
+    """Dunya klasorunu kalici siler. (basari, ad/hata) doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return False, "Profil bulunamadı."
+    wd = _safe_world_dir(inst_dir, world_name)
+    if not wd:
+        return False, "Geçersiz dünya adı."
+    try:
+        shutil.rmtree(wd)
+    except Exception as e:
+        return False, f"Silinemedi: {e}"
+    return True, os.path.basename(wd)
+
+
+def list_instance_screenshots(inst_id):
+    """screenshots/ altindaki resimleri (mtime azalan) listeler."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return None
+    sc_dir = os.path.join(inst_dir, "screenshots")
+    shots = []
+    if os.path.isdir(sc_dir):
+        for name in os.listdir(sc_dir):
+            fp = os.path.join(sc_dir, name)
+            if not os.path.isfile(fp) or not name.lower().endswith(ASSET_IMAGE_EXTS):
+                continue
+            try:
+                st = os.stat(fp)
+            except Exception:
+                continue
+            shots.append({"name": name, "size": st.st_size, "mtime": st.st_mtime})
+    shots.sort(key=lambda s: s["mtime"], reverse=True)
+    return shots
+
+
+def list_instance_logs(inst_id):
+    """crash-reports/* + logs/*.log listesi; profil yoksa None doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not os.path.isdir(inst_dir):
+        return None
+    items = []
+    for sub in LOG_DIRS:
+        base = os.path.join(inst_dir, sub)
+        if not os.path.isdir(base):
+            continue
+        for name in os.listdir(base):
+            fp = os.path.join(base, name)
+            if not os.path.isfile(fp):
+                continue
+            low = name.lower()
+            if sub == "logs" and not low.endswith(".log"):
+                continue
+            if sub == "crash-reports" and not low.endswith(ASSET_LOG_EXTS):
+                continue
+            try:
+                st = os.stat(fp)
+            except Exception:
+                continue
+            items.append({
+                "name": name,
+                "dir": sub,
+                "size_kb": round(st.st_size / 1024.0, 1),
+                "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+                "mtime": st.st_mtime,
+            })
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    for it in items:
+        it.pop("mtime", None)
+    return items
+
+
+def tail_log_file(inst_id, dir_name, file_name, max_lines=200, max_bytes=262144):
+    """Kayit dosyasinin son max_lines satirini dondurur; gecersizde None."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return None
+    sub = str(dir_name or "")
+    if sub not in LOG_DIRS:
+        return None
+    base = os.path.join(inst_dir, sub)
+    fp = _safe_asset_path(base, file_name, allowed_exts=ASSET_LOG_EXTS)
+    if not fp or not os.path.isfile(fp):
+        return None
+    try:
+        size = os.path.getsize(fp)
+        with open(fp, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            raw = f.read()
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        if size > max_bytes and lines:
+            lines = lines[1:]  # yarim satiri at
+        return lines[-max_lines:]
+    except Exception:
+        return None
+
+
+def read_instance_note(inst_id):
+    """note.txt icerigini dondurur; (icerik, var_mi) doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return "", False
+    note_path = os.path.join(inst_dir, NOTE_FILENAME)
+    if not os.path.isfile(note_path):
+        return "", False
+    try:
+        with open(note_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read(NOTE_MAX_CHARS), True
+    except Exception:
+        return "", False
+
+
+def write_instance_note(inst_id, content):
+    """note.txt dosyasini yazar. (basari, hata) doner."""
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not os.path.isdir(inst_dir):
+        return False, "Profil bulunamadı."
+    text = str(content if content is not None else "")[:NOTE_MAX_CHARS]
+    try:
+        with open(os.path.join(inst_dir, NOTE_FILENAME), "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        return False, f"Not kaydedilemedi: {e}"
+    return True, ""
+
+
 # ==================== HTTP REST API SUNUCUSU ====================
 class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
     server_version = "CookieLauncherCore/2.0"
@@ -2526,6 +2852,25 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             pass
 
+    def serve_binary(self, file_path, mime, cache="no-store"):
+        """Ikili dosyayi (resim vb.) HTTP yaniti olarak sunar."""
+        try:
+            with open(file_path, "rb") as f:
+                raw = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", mime or "application/octet-stream")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", cache)
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            try:
+                self.send_json({"success": False, "error": "Dosya okunamadı."}, 404)
+            except Exception:
+                pass
+
     def get_post_body(self):
         try:
             content_len = int(self.headers.get("Content-Length", 0))
@@ -2562,7 +2907,8 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     "api_version": API_VERSION,
                     "features": ["instances", "modpack", "instance_mods", "content_manage",
                                  "content_icons", "loader_versions", "net_test",
-                                 "profile_detail", "content_toggle", "mod_deps"],
+                                 "profile_detail", "content_toggle", "mod_deps",
+                                 "profile_assets"],
                 })
                 return
 
@@ -2785,6 +3131,95 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(raw)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
+                return
+
+            # 6e. Faz 3/4: Profil notu
+            if path == "/instances/note":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                inst_dir = get_instance_dir(inst_id)
+                if not inst_dir or not os.path.isdir(inst_dir):
+                    self.send_json({"success": False, "error": "Profil bulunamadı."})
+                    return
+                content, exists = read_instance_note(inst_id)
+                self.send_json({"success": True, "content": content, "exists": exists})
+                return
+
+            # 6f. Faz 4: Dunyalar
+            if path == "/instances/worlds":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                worlds = list_instance_worlds(inst_id)
+                if worlds is None:
+                    self.send_json({"success": False, "error": "Profil bulunamadı.", "worlds": []})
+                    return
+                self.send_json({"success": True, "instance": inst_id, "worlds": worlds})
+                return
+
+            # 6f-2. Dunya ikonu (varsa icon.png servis edilir)
+            if path == "/instances/world/icon":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                inst_dir = get_instance_dir(inst_id)
+                wd = _safe_world_dir(inst_dir, query.get("world", [""])[0]) if inst_dir else None
+                icon_path = os.path.join(wd, "icon.png") if wd else ""
+                if not icon_path or not os.path.isfile(icon_path):
+                    self.send_json({"success": False, "error": "İkon bulunamadı."}, 404)
+                    return
+                self.serve_binary(icon_path, "image/png", "public, max-age=3600")
+                return
+
+            # 6g. Faz 4: Sunucular (servers.dat -> NBT)
+            if path == "/instances/servers":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                inst_dir = get_instance_dir(inst_id)
+                if not inst_dir or not os.path.isdir(inst_dir):
+                    self.send_json({"success": False, "error": "Profil bulunamadı.", "servers": []})
+                    return
+                srv_path = os.path.join(inst_dir, "servers.dat")
+                exists = os.path.isfile(srv_path)
+                servers = read_servers_dat(srv_path) if exists else []
+                self.send_json({"success": True, "instance": inst_id, "servers": servers, "exists": exists})
+                return
+
+            # 6h. Faz 4: Ekran goruntuleri
+            if path == "/instances/screenshots":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                shots = list_instance_screenshots(inst_id)
+                if shots is None:
+                    self.send_json({"success": False, "error": "Profil bulunamadı.", "screenshots": []})
+                    return
+                self.send_json({"success": True, "instance": inst_id, "screenshots": shots})
+                return
+
+            # 6h-2. Tek ekran goruntusu dosyasi
+            if path == "/instances/screenshot/file":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                inst_dir = get_instance_dir(inst_id)
+                sc_dir = os.path.join(inst_dir, "screenshots") if inst_dir else ""
+                fp = _safe_asset_path(sc_dir, query.get("name", [""])[0], ASSET_IMAGE_EXTS) if sc_dir else None
+                if not fp or not os.path.isfile(fp):
+                    self.send_json({"success": False, "error": "Görüntü bulunamadı."}, 404)
+                    return
+                mime = mimetypes.guess_type(fp)[0] or "application/octet-stream"
+                self.serve_binary(fp, mime, "public, max-age=3600")
+                return
+
+            # 6i. Faz 4: Diger kayitlar (crash-reports + logs)
+            if path == "/instances/logs":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                files = list_instance_logs(inst_id)
+                if files is None:
+                    self.send_json({"success": False, "error": "Profil bulunamadı.", "files": []})
+                    return
+                self.send_json({"success": True, "instance": inst_id, "files": files})
+                return
+
+            # 6i-2. Kayit dosyasinin son 200 satiri
+            if path == "/instances/log/file":
+                inst_id = query.get("instance", [""])[0] or query.get("instance_id", [""])[0]
+                lines = tail_log_file(inst_id, query.get("dir", [""])[0], query.get("name", [""])[0])
+                if lines is None:
+                    self.send_json({"success": False, "error": "Kayıt dosyası bulunamadı."}, 404)
+                    return
+                self.send_json({"success": True, "lines": lines, "count": len(lines)})
                 return
 
             # Bilinmeyen /api yollari JSON 404 dondurur (HTML degil!)
@@ -3200,6 +3635,38 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     action = "etkinleştirildi" if enabled else "devre dışı bırakıldı"
                     add_log(f"🔁 İçerik {action}: {msg}")
                     self.send_json({"success": True, "name": msg, "enabled": enabled})
+                else:
+                    self.send_json({"success": False, "error": msg})
+                return
+
+            # 7d. Faz 3/4: Profil notu kaydet (note.txt)
+            if path in ("/instances/note", "/instances/note/"):
+                inst_id = body.get("instance") or body.get("instance_id")
+                ok, msg = write_instance_note(inst_id, body.get("content", ""))
+                if ok:
+                    self.send_json({"success": True, "message": "Not kaydedildi."})
+                else:
+                    self.send_json({"success": False, "error": msg})
+                return
+
+            # 7e. Faz 4: Dunya kopyala ("name (kopya)")
+            if path in ("/instances/world/copy", "/instances/world/copy/"):
+                inst_id = body.get("instance") or body.get("instance_id")
+                ok, msg = copy_instance_world(inst_id, body.get("world"))
+                if ok:
+                    add_log(f"📋 Dünya kopyalandı: {msg}")
+                    self.send_json({"success": True, "name": msg, "message": f"{msg} oluşturuldu."})
+                else:
+                    self.send_json({"success": False, "error": msg})
+                return
+
+            # 7f. Faz 4: Dunya sil (onay frontend'de alinir)
+            if path in ("/instances/world/delete", "/instances/world/delete/"):
+                inst_id = body.get("instance") or body.get("instance_id")
+                ok, msg = delete_instance_world(inst_id, body.get("world"))
+                if ok:
+                    add_log(f"🗑️ Dünya silindi: {msg}")
+                    self.send_json({"success": True, "name": msg, "message": f"{msg} silindi."})
                 else:
                     self.send_json({"success": False, "error": msg})
                 return

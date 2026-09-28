@@ -3229,7 +3229,12 @@ button.installed-cat-tab {
   /* Profil detay ekranı animasyonları */
   .pds-pane,
   .pds-soon-icon,
-  .pds-drawer {
+  .pds-drawer,
+  .pds-store,
+  .pds-store-card,
+  .pds-store-backdrop,
+  .pds-lightbox,
+  .pds-shot-card {
     animation: none !important;
     transition: none !important;
   }
@@ -4685,4 +4690,409 @@ body {
 @media (max-width: 860px) {
   .pds-sidebar { width: 190px; }
   .pds-mr-bar { grid-template-columns: 1fr; }
+}
+
+/* ==============================================================================
+   FAZ 3/4: SHADER MAĞAZASI + PROFİL VARLIKLARI (NOT/DÜNYA/SUNUCU/GÖRÜNTÜ/KAYIT)
+   ============================================================================== */
+
+/* ---------- Shader mağazası overlay ---------- */
+.pds-store-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+  z-index: 903;
+}
+
+.pds-store-backdrop.show { opacity: 1; pointer-events: auto; }
+
+.pds-store {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -47%) scale(0.97);
+  width: min(1120px, 94vw);
+  height: min(760px, 88vh);
+  z-index: 904;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pds-store.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.pds-store-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.pds-store-titleline { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pds-store-emoji { font-size: 26px; flex-shrink: 0; }
+.pds-store-title { font-size: 15px; font-weight: 800; color: #fff; }
+.pds-store-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.pds-store-bar {
+  display: grid;
+  grid-template-columns: 1fr 190px auto;
+  gap: 10px;
+  padding: 14px 18px 8px;
+  flex-shrink: 0;
+}
+
+.pds-store-note {
+  font-size: 11px;
+  color: var(--accent-yellow);
+  padding: 0 18px 12px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.pds-store-note code {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.pds-store-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 18px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 14px;
+  align-content: start;
+}
+
+.pds-store-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  animation: pdsStoreCardIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pds-store-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.pds-store-card.is-installed { border-color: rgba(126, 231, 135, 0.35); }
+
+.pds-store-hero {
+  position: relative;
+  height: 150px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(255, 155, 43, 0.22), rgba(0, 0, 0, 0.4));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  overflow: hidden;
+}
+
+.pds-store-hero img { width: 100%; height: 100%; object-fit: cover; }
+
+.pds-store-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border-subtle);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: help;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.pds-store-hint:hover { background: rgba(255, 155, 43, 0.35); border-color: var(--border-accent); }
+
+.pds-store-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #7ee787;
+  background: rgba(16, 36, 22, 0.88);
+  border: 1px solid rgba(126, 231, 135, 0.4);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.pds-store-body {
+  padding: 12px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pds-store-name { font-size: 13.5px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pds-store-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 34px;
+}
+
+.pds-store-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pds-store-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.pds-store-actions { padding: 10px 14px 14px; }
+.pds-store-install { width: 100%; }
+
+.pds-btn.is-installed,
+.pds-store-install.is-installed {
+  color: #7ee787;
+  border-color: rgba(126, 231, 135, 0.4);
+  background: rgba(126, 231, 135, 0.1);
+}
+
+/* ---------- Çekmece galerisi (Faz 3) ---------- */
+.pds-drawer-gallery {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.pds-drawer-gallery-item {
+  flex: 0 0 150px;
+  height: 92px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.3);
+  cursor: zoom-in;
+}
+
+.pds-drawer-gallery-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------- Notlar (Faz 4) ---------- */
+.pds-note-wrap { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.pds-note-status { font-size: 11.5px; color: var(--accent-gold); align-self: center; white-space: nowrap; }
+
+.pds-note-area {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  background: rgba(8, 8, 12, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  color: #e5e7eb;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.pds-note-area:focus { border-color: var(--border-accent); }
+.pds-note-area:disabled { opacity: 0.6; }
+
+.pds-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.pds-note-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ---------- Varlık listeleri (Dünyalar / Sunucular / Kayıtlar) ---------- */
+.pds-asset-list { display: flex; flex-direction: column; gap: 8px; }
+
+.pds-asset {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease;
+}
+
+.pds-asset:hover { border-color: var(--border-accent); }
+
+.pds-asset-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  overflow: hidden;
+}
+
+.pds-asset-icon img { width: 100%; height: 100%; object-fit: cover; }
+.pds-asset-info { flex: 1; min-width: 0; }
+
+.pds-asset-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pds-asset-meta {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pds-asset-ip { color: var(--accent-blue); }
+
+/* ---------- Ekran görüntüleri (Faz 4) ---------- */
+.pds-shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.pds-shot-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pds-shot-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+.pds-shot-thumb {
+  height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 30px;
+  overflow: hidden;
+}
+
+.pds-shot-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.pds-shot-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.pds-shot-meta span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Büyük görünüm (lightbox) ---------- */
+.pds-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 910;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.86);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  padding: 34px;
+}
+
+.pds-lightbox.show { opacity: 1; pointer-events: auto; }
+
+.pds-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.pds-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.pds-lightbox-close:hover { background: rgba(243, 139, 168, 0.22); border-color: rgba(243, 139, 168, 0.4); }
+
+/* ---------- Mağaza animasyonları ---------- */
+@keyframes pdsStoreCardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 860px) {
+  .pds-store-bar { grid-template-columns: 1fr; }
+  .pds-store-grid { grid-template-columns: 1fr; }
 }

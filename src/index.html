@@ -322,6 +322,38 @@
       </div>
       <div class="pds-drawer-body" id="pdsDrawerBody"></div>
     </aside>
+
+    <!-- SHADER MAĞAZASI (FAZ 3): aynı ekran içinde overlay panel -->
+    <div class="pds-store-backdrop" id="pdsStoreBackdrop"></div>
+    <section class="pds-store" id="pdsStore" aria-hidden="true">
+      <div class="pds-store-head">
+        <div class="pds-store-titleline">
+          <span class="pds-store-emoji">🛍️</span>
+          <div>
+            <h3 class="pds-store-title">Shader Mağazası</h3>
+            <p class="pds-store-sub" id="pdsStoreSub">Modrinth'ten shader paketleri indirin.</p>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="pdsStoreClose" title="Kapat (ESC)">✕</button>
+      </div>
+      <div class="pds-store-bar">
+        <input type="text" class="styled-input" id="pdsStoreQuery" placeholder="Shader ara... (örn: complementary)" autocomplete="off" spellcheck="false">
+        <select class="styled-select" id="pdsStoreSort" aria-label="Sıralama">
+          <option value="relevance">İlgi</option>
+          <option value="downloads" selected>En çok indirilen</option>
+          <option value="newest">En yeni</option>
+        </select>
+        <button type="button" class="btn-primary-action" id="pdsStoreSearchBtn">🔍 Ara</button>
+      </div>
+      <div class="pds-store-note">ℹ️ Shader'lar <code>shaderpacks/</code> klasörüne kurulur; oyun içinde Iris/OptiFine menüsünden seçilir.</div>
+      <div class="pds-store-grid" id="pdsStoreResults"></div>
+    </section>
+
+    <!-- EKRAN GÖRÜNTÜSÜ BÜYÜK GÖRÜNÜM (FAZ 4) -->
+    <div class="pds-lightbox" id="pdsLightbox" aria-hidden="true">
+      <button class="pds-lightbox-close" id="pdsLightboxClose" title="Kapat (ESC)">✕</button>
+      <img class="pds-lightbox-img" id="pdsLightboxImg" alt="">
+    </div>
   </div>
 
   <!-- =================== MODAL: YENİ PROFİL (SEKMELİ YENİ ARAYÜZ) =================== -->

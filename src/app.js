@@ -196,7 +196,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 12) {
+        if (data && Number(data.api_version) >= 13) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -2619,7 +2619,15 @@ const pdsState = {
   contentError: "",
   missingDeps: [],
   modrinth: { type: "mod", query: "", hits: [], loading: false, searched: false },
-  drawerOpen: false
+  drawerOpen: false,
+  // Faz 3: shader mağazası durumu
+  store: { open: false, query: "", sort: "downloads", hits: [], loading: false, searched: false, error: "", installed: new Set() },
+  // Faz 4: profil varlıkları
+  note: { loaded: false, saving: false, timer: null, lastSaved: "", pending: null },
+  worlds: null,
+  servers: null,
+  shots: null,
+  otherLogs: null
 };
 
 function pdsEsc(value) {
@@ -2643,11 +2651,36 @@ function initProfileDetailScreen() {
   const close = document.getElementById("pdsCloseBtn");
   const drawerClose = document.getElementById("pdsDrawerClose");
   const backdrop = document.getElementById("pdsDrawerBackdrop");
+  const storeBackdrop = document.getElementById("pdsStoreBackdrop");
+  const storeClose = document.getElementById("pdsStoreClose");
+  const storeSearch = document.getElementById("pdsStoreSearchBtn");
+  const storeQuery = document.getElementById("pdsStoreQuery");
+  const storeSort = document.getElementById("pdsStoreSort");
+  const lightbox = document.getElementById("pdsLightbox");
+  const lightboxClose = document.getElementById("pdsLightboxClose");
 
   if (back) back.addEventListener("click", closeProfileDetail);
   if (close) close.addEventListener("click", closeProfileDetail);
   if (drawerClose) drawerClose.addEventListener("click", pdsCloseDrawer);
   if (backdrop) backdrop.addEventListener("click", pdsCloseDrawer);
+  if (storeBackdrop) storeBackdrop.addEventListener("click", pdsCloseShaderStore);
+  if (storeClose) storeClose.addEventListener("click", pdsCloseShaderStore);
+  if (storeSearch) storeSearch.addEventListener("click", pdsSearchShaderStore);
+  if (storeQuery) {
+    storeQuery.addEventListener("keydown", (e) => { if (e.key === "Enter") pdsSearchShaderStore(); });
+  }
+  if (storeSort) {
+    storeSort.addEventListener("change", () => {
+      pdsState.store.sort = storeSort.value;
+      pdsLoadShaderStore();
+    });
+  }
+  if (lightboxClose) lightboxClose.addEventListener("click", pdsCloseLightbox);
+  if (lightbox) {
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox) pdsCloseLightbox();
+    });
+  }
 
   document.querySelectorAll(".pds-side-tab").forEach(btn => {
     btn.addEventListener("click", () => pdsSwitchTab(btn.getAttribute("data-pds-tab")));
@@ -2661,6 +2694,9 @@ function initProfileDetailScreen() {
     const modalOpen = Array.from(document.querySelectorAll(".modal-backdrop"))
       .some(m => m && m.style.display === "flex");
     if (modalOpen) return;
+    const lb = document.getElementById("pdsLightbox");
+    if (lb && lb.classList.contains("show")) { pdsCloseLightbox(); return; }
+    if (pdsState.store.open) { pdsCloseShaderStore(); return; }
     if (pdsState.drawerOpen) { pdsCloseDrawer(); return; }
     closeProfileDetail();
   });
@@ -2686,7 +2722,15 @@ function openProfileDetail(instanceId, tabId) {
   pdsState.contentError = "";
   pdsState.missingDeps = [];
   pdsState.modrinth = { type: "mod", query: "", hits: [], loading: false, searched: false };
+  pdsState.store = { open: false, query: "", sort: "downloads", hits: [], loading: false, searched: false, error: "", installed: new Set() };
+  pdsState.note = { loaded: false, saving: false, timer: null, lastSaved: "", pending: null };
+  pdsState.worlds = null;
+  pdsState.servers = null;
+  pdsState.shots = null;
+  pdsState.otherLogs = null;
   pdsCloseDrawer();
+  pdsCloseShaderStore();
+  pdsCloseLightbox();
 
   const screen = document.getElementById("profileDetailScreen");
   if (!screen) return;
@@ -2701,6 +2745,15 @@ function closeProfileDetail() {
   const screen = document.getElementById("profileDetailScreen");
   if (!screen) return;
   pdsCloseDrawer();
+  pdsCloseShaderStore();
+  pdsCloseLightbox();
+  if (pdsState.note.timer) {
+    clearTimeout(pdsState.note.timer);
+    pdsState.note.timer = null;
+    if (pdsState.note.pending !== null && pdsState.note.pending !== pdsState.note.lastSaved) {
+      pdsSaveNote(pdsState.note.pending, null);
+    }
+  }
   screen.style.display = "none";
   screen.setAttribute("aria-hidden", "true");
 }
@@ -2740,6 +2793,12 @@ function pdsRenderHeader() {
 }
 
 function pdsSwitchTab(tabId) {
+  // Notlar sekmesinden çıkarken bekleyen otomatik kaydı hemen tamamla
+  if (pdsState.activeTab === "notes" && pdsState.note.timer && pdsState.note.pending !== null) {
+    clearTimeout(pdsState.note.timer);
+    pdsState.note.timer = null;
+    pdsSaveNote(pdsState.note.pending, null);
+  }
   pdsState.activeTab = tabId;
   document.querySelectorAll(".pds-side-tab").forEach(btn => {
     btn.classList.toggle("active", btn.getAttribute("data-pds-tab") === tabId);
@@ -2761,6 +2820,11 @@ function pdsSwitchTab(tabId) {
   if (tabId === "mods") return pdsRenderContentTab(pane, "mod");
   if (tabId === "shader") return pdsRenderContentTab(pane, "shader");
   if (tabId === "resourcepack") return pdsRenderContentTab(pane, "resourcepack");
+  if (tabId === "notes") return pdsRenderNotesTab(pane);
+  if (tabId === "worlds") return pdsRenderWorldsTab(pane);
+  if (tabId === "servers") return pdsRenderServersTab(pane);
+  if (tabId === "screenshots") return pdsRenderProfileShotsTab(pane);
+  if (tabId === "others") return pdsRenderOtherLogsTab(pane);
   return pdsRenderSoonTab(pane, tabId);
 }
 
@@ -2773,7 +2837,10 @@ function pdsRenderContentTab(pane, cat) {
         <h3 class="pds-section-title">${info.icon} ${info.label}</h3>
         <p class="pds-section-sub">Bu profildeki kurulu içerikler. Anahtarla aç/kapat, detaydan Modrinth bilgisine bak.</p>
       </div>
-      <button type="button" class="btn-secondary" id="pdsRefreshBtn">↻ Yenile</button>
+      <div class="pds-head-actions">
+        ${cat === "shader" ? '<button type="button" class="btn-primary-action" id="pdsShaderStoreBtn">🛍️ Paket İndir</button>' : ""}
+        <button type="button" class="btn-secondary" id="pdsRefreshBtn">↻ Yenile</button>
+      </div>
     </div>
     ${cat === "mod" ? '<div class="pds-deps-warn" id="pdsDepsWarn" style="display:none;"></div>' : ""}
     <div class="pds-list" id="pdsListWrap">
@@ -2785,6 +2852,8 @@ function pdsRenderContentTab(pane, cat) {
     pdsLoadContent(cat, true);
     if (cat === "mod") pdsLoadMissingDeps();
   });
+  const storeBtn = document.getElementById("pdsShaderStoreBtn");
+  if (storeBtn) storeBtn.addEventListener("click", pdsOpenShaderStore);
   pdsLoadContent(cat, false);
   if (cat === "mod") pdsLoadMissingDeps();
 }
@@ -3082,6 +3151,31 @@ function pdsDrawerActions(item, cat) {
     wrap.appendChild(link);
   }
 
+  // Mağazadan açılan (henüz kurulmamış) içerik: sil/klasör yerine kur butonu
+  if (item.store_mode) {
+    const hit = item.hit || {};
+    const installed = pdsIsShaderInstalled(hit);
+    const installBtn = document.createElement("button");
+    installBtn.type = "button";
+    installBtn.className = "pds-btn pds-btn-primary";
+    installBtn.textContent = installed ? "Kuruldu ✓" : "⬇ Kur";
+    if (installed) {
+      installBtn.disabled = true;
+      installBtn.classList.add("is-installed");
+    } else {
+      installBtn.addEventListener("click", () => pdsInstallShader(hit, installBtn));
+    }
+    wrap.appendChild(installBtn);
+
+    const folderBtn = document.createElement("button");
+    folderBtn.type = "button";
+    folderBtn.className = "pds-btn";
+    folderBtn.textContent = "📂 Klasörü Aç";
+    folderBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${dir}`));
+    wrap.appendChild(folderBtn);
+    return wrap;
+  }
+
   const folderBtn = document.createElement("button");
   folderBtn.type = "button";
   folderBtn.className = "pds-btn";
@@ -3143,6 +3237,31 @@ function pdsRenderProjectDrawer(data, local) {
   desc.textContent = data.description || "Açıklama bulunmuyor.";
   body.appendChild(desc);
 
+  // Faz 3: Modrinth galeri resimleri (yatay şerit; yüklenemeyen gizlenir)
+  const gallery = Array.isArray(data.gallery) ? data.gallery.filter(Boolean) : [];
+  if (gallery.length > 0) {
+    const galTitle = document.createElement("h4");
+    galTitle.className = "pds-drawer-subtitle";
+    galTitle.textContent = `Galeri (${gallery.length})`;
+    body.appendChild(galTitle);
+
+    const strip = document.createElement("div");
+    strip.className = "pds-drawer-gallery";
+    gallery.forEach(url => {
+      const cell = document.createElement("div");
+      cell.className = "pds-drawer-gallery-item";
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => cell.remove());
+      cell.addEventListener("click", () => pdsOpenLightbox(url));
+      cell.appendChild(img);
+      strip.appendChild(cell);
+    });
+    body.appendChild(strip);
+  }
+
   const versionsTitle = document.createElement("h4");
   versionsTitle.className = "pds-drawer-subtitle";
   versionsTitle.textContent = `Sürüm Geçmişi (${(data.versions || []).length})`;
@@ -3191,11 +3310,10 @@ function pdsRenderProjectDrawer(data, local) {
   }
   body.appendChild(depList);
 
-  body.appendChild(pdsDrawerActions({
-    name: local.item.name,
+  body.appendChild(pdsDrawerActions(Object.assign({}, local.item, {
     display_name: data.title,
     source_url: data.source_url || ""
-  }, local.cat));
+  }), local.cat));
 }
 
 function pdsRenderLocalDrawer(local, note) {
@@ -3631,5 +3749,866 @@ function pdsRenderSoonTab(pane, tabId) {
   const btn = document.getElementById("pdsSoonFolder");
   if (btn) {
     btn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${info.folder}`));
+  }
+}
+
+/* ==============================================================================
+   FAZ 3: SHADER MAĞAZASI (profil detayı içinde overlay panel)
+   ============================================================================== */
+
+function pdsOpenShaderStore() {
+  const storeEl = document.getElementById("pdsStore");
+  const backdrop = document.getElementById("pdsStoreBackdrop");
+  const input = document.getElementById("pdsStoreQuery");
+  const sortSel = document.getElementById("pdsStoreSort");
+  if (!storeEl) return;
+
+  const inst = pdsSyncInstance();
+  const sub = document.getElementById("pdsStoreSub");
+  if (sub) {
+    sub.textContent = `Modrinth araması profile göre filtrelenir: MC ${inst ? inst.version : "?"} • shader`;
+  }
+  if (input) input.value = pdsState.store.query || "";
+  if (sortSel) sortSel.value = pdsState.store.sort || "downloads";
+
+  pdsState.store.open = true;
+  storeEl.classList.add("open");
+  storeEl.setAttribute("aria-hidden", "false");
+  if (backdrop) backdrop.classList.add("show");
+
+  pdsRefreshInstalledShaderSlugs().then(() => pdsLoadShaderStore());
+}
+
+function pdsCloseShaderStore() {
+  const storeEl = document.getElementById("pdsStore");
+  const backdrop = document.getElementById("pdsStoreBackdrop");
+  pdsState.store.open = false;
+  if (storeEl) {
+    storeEl.classList.remove("open");
+    storeEl.setAttribute("aria-hidden", "true");
+  }
+  if (backdrop) backdrop.classList.remove("show");
+}
+
+function pdsSearchShaderStore() {
+  const input = document.getElementById("pdsStoreQuery");
+  pdsState.store.query = input ? input.value.trim() : "";
+  pdsLoadShaderStore();
+}
+
+async function pdsRefreshInstalledShaderSlugs() {
+  const installed = new Set();
+  const addFile = (f) => {
+    ["slug", "name", "display_name"].forEach(k => {
+      const v = String((f && f[k]) || "").trim().toLowerCase();
+      if (v) installed.add(v);
+    });
+    const base = String((f && f.name) || "").trim().toLowerCase().replace(/\.disabled$/, "");
+    if (base) installed.add(base);
+  };
+
+  if (Array.isArray(pdsState.content.shader)) {
+    pdsState.content.shader.forEach(addFile);
+  } else {
+    const data = await apiGet(
+      `/api/instances/content?instance_id=${encodeURIComponent(pdsState.instanceId)}`,
+      10000
+    );
+    const files = (data && data.success && data.categories && data.categories.shader &&
+      data.categories.shader.files) || [];
+    if (Array.isArray(files)) files.forEach(addFile);
+  }
+  pdsState.store.installed = installed;
+}
+
+function pdsIsShaderInstalled(hit) {
+  const set = pdsState.store.installed instanceof Set ? pdsState.store.installed : new Set();
+  const slug = String((hit && hit.slug) || "").trim().toLowerCase();
+  const title = String((hit && hit.title) || "").trim().toLowerCase();
+  return (slug && set.has(slug)) || (title && set.has(title));
+}
+
+async function pdsLoadShaderStore() {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  pdsState.store.loading = true;
+  pdsState.store.searched = true;
+  pdsState.store.error = "";
+  pdsRenderShaderStore();
+
+  const params = new URLSearchParams({
+    q: pdsState.store.query || "",
+    type: "shader",
+    version: inst.version || "",
+    sort: pdsState.store.sort || "downloads",
+    limit: 20,
+    offset: 0
+  });
+
+  const data = await apiGet(`/api/modrinth/search?${params.toString()}`, 20000);
+  pdsState.store.loading = false;
+
+  if (!data || data.error || !Array.isArray(data.hits)) {
+    pdsState.store.hits = [];
+    pdsState.store.error = (data && data.error) || "Modrinth yanıt vermedi.";
+    pdsRenderShaderStore();
+    return;
+  }
+  pdsState.store.hits = data.hits;
+  pdsRenderShaderStore();
+}
+
+function pdsRenderShaderStore() {
+  const wrap = document.getElementById("pdsStoreResults");
+  if (!wrap) return;
+  const st = pdsState.store;
+
+  if (st.loading) {
+    wrap.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth shader mağazası taranıyor...</span></div>`;
+    return;
+  }
+  if (st.error) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc(st.error)}</div>`;
+    return;
+  }
+  if (!st.searched) {
+    wrap.innerHTML = `<div class="pds-empty">Aramak için bir şeyler yazın veya aşağıdaki listeyi yükleyin.</div>`;
+    return;
+  }
+  if (!st.hits || st.hits.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">Aradığınız kriterlere uygun shader bulunamadı.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  st.hits.forEach((hit, idx) => {
+    const installed = pdsIsShaderInstalled(hit);
+    const card = document.createElement("div");
+    card.className = "pds-store-card" + (installed ? " is-installed" : "");
+    card.style.animationDelay = `${Math.min(idx * 0.03, 0.4)}s`;
+
+    // Hero: Modrinth galerisi veya ikon
+    const hero = document.createElement("div");
+    hero.className = "pds-store-hero";
+    const gallery = Array.isArray(hit.gallery) ? hit.gallery.filter(Boolean) : [];
+    const heroUrl = gallery[0] || hit.icon_url || "";
+    if (heroUrl) {
+      const img = document.createElement("img");
+      img.src = heroUrl;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => {
+        if (hit.icon_url && img.src !== hit.icon_url) {
+          img.src = hit.icon_url;
+        } else {
+          img.remove();
+          hero.textContent = "✨";
+        }
+      });
+      hero.appendChild(img);
+    } else {
+      hero.textContent = "✨";
+    }
+
+    const hint = document.createElement("span");
+    hint.className = "pds-store-hint";
+    hint.textContent = "ℹ️";
+    hint.title = "Oyun içinde Iris/OptiFine menüsünden seçilir";
+    hint.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showToast("ℹ️ Shader'ı oyun içinde Iris/OptiFine menüsünden seçin.", "info");
+    });
+    hero.appendChild(hint);
+    if (installed) {
+      const badge = document.createElement("span");
+      badge.className = "pds-store-badge";
+      badge.textContent = "Kuruldu ✓";
+      hero.appendChild(badge);
+    }
+
+    const cats = (hit.display_categories && hit.display_categories.length
+      ? hit.display_categories
+      : hit.categories) || [];
+
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "pds-store-body";
+    bodyEl.innerHTML = `
+      <div class="pds-store-name" title="${pdsEsc(hit.title)}">${pdsEsc(hit.title || hit.slug)}</div>
+      <div class="pds-store-desc">${pdsEsc(hit.description || "Açıklama bulunmuyor.")}</div>
+      <div class="pds-store-meta">
+        <span>⬇ ${Number(hit.downloads || 0).toLocaleString()}</span>
+        ${hit.author ? `<span>👤 ${pdsEsc(hit.author)}</span>` : ""}
+      </div>
+      <div class="pds-store-chips">${cats.slice(0, 3).map(c => `<span class="pds-chip">${pdsEsc(c)}</span>`).join("")}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "pds-store-actions";
+    const installBtn = document.createElement("button");
+    installBtn.type = "button";
+    installBtn.className = "pds-btn pds-btn-primary pds-store-install";
+    installBtn.textContent = installed ? "Kuruldu ✓" : "⬇ Kur";
+    if (installed) {
+      installBtn.disabled = true;
+      installBtn.classList.add("is-installed");
+    } else {
+      installBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pdsInstallShader(hit, installBtn);
+      });
+    }
+    actions.appendChild(installBtn);
+
+    card.appendChild(hero);
+    card.appendChild(bodyEl);
+    card.appendChild(actions);
+    card.addEventListener("click", () => pdsOpenStoreDrawer(hit));
+    wrap.appendChild(card);
+  });
+}
+
+function pdsOpenStoreDrawer(hit) {
+  pdsOpenDrawer({
+    slug: hit.slug,
+    name: hit.slug,
+    display_name: hit.title || hit.slug,
+    description: hit.description || "",
+    store_mode: true,
+    hit: hit
+  }, "shader");
+}
+
+async function pdsInstallShader(hit, buttonEl) {
+  const inst = pdsSyncInstance();
+  if (!inst) return;
+
+  const original = buttonEl ? buttonEl.textContent : "";
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+  showToast(`📥 ${hit.title || hit.slug} → "${inst.name}" profiline indiriliyor...`, "info");
+
+  const payload = {
+    slug: hit.slug,
+    version: inst.version,
+    loader: inst.loader,
+    instance_id: pdsState.instanceId,
+    project_type: "shader",
+    install_dependencies: false
+  };
+  const data = await apiPost("/api/modrinth/install", payload, 180000);
+
+  if (data && data.needs_confirm) {
+    if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "⬇ Kur"; }
+    const ok = await showConfirmDialog({
+      icon: "⚠️",
+      title: "Sürüm Tam Eşleşmiyor",
+      message: `${data.message || "Bu shader sürümünüzle tam eşleşmiyor olabilir."} Yine de indirmek ister misiniz?`,
+      okText: "Yine de İndir"
+    });
+    if (ok) {
+      if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+      const forced = await apiPost("/api/modrinth/install", Object.assign({}, payload, { force: true }), 180000);
+      pdsHandleShaderInstallResult(forced, hit, buttonEl, original);
+    }
+    return;
+  }
+  pdsHandleShaderInstallResult(data, hit, buttonEl, original);
+}
+
+async function pdsHandleShaderInstallResult(data, hit, buttonEl, original) {
+  if (data && data.success) {
+    showToast(`✓ ${data.filename || hit.slug} shaderpacks klasörüne kuruldu.`, "success");
+    if (buttonEl) {
+      buttonEl.disabled = true;
+      buttonEl.textContent = "Kuruldu ✓";
+      buttonEl.classList.add("is-installed");
+    }
+    pdsState.store.installed.add(String(hit.slug || "").trim().toLowerCase());
+    await pdsLoadContent("shader", true);
+    await pdsRefreshInstalledShaderSlugs();
+    pdsRenderShaderStore();
+    loadInstances();
+  } else {
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = original || "⬇ Kur";
+    }
+    showToast(`⚠️ ${(data && data.error) || "Shader kurulamadı."}`, "error");
+  }
+}
+
+/* ==============================================================================
+   FAZ 4: PROFİL VARLIKLARI (Notlar / Dünyalar / Sunucular / Görüntüler / Kayıtlar)
+   ============================================================================== */
+
+async function pdsCopyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      showToast(`📋 Kopyalandı: ${text}`, "success");
+      return;
+    }
+  } catch (_) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    showToast(`📋 Kopyalandı: ${text}`, "success");
+  } catch (_) {
+    showToast("Kopyalanamadı.", "error");
+  }
+}
+
+// ---------- Notlar ----------
+async function pdsRenderNotesTab(pane) {
+  const inst = pdsSyncInstance();
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">📝 Notlar</h3>
+        <p class="pds-section-sub">"${pdsEsc(inst ? inst.name : "Profil")}" için not defteri (note.txt). Yazarken otomatik kaydedilir.</p>
+      </div>
+      <div class="pds-head-actions">
+        <span class="pds-note-status" id="pdsNoteStatus"></span>
+        <button type="button" class="btn-secondary" id="pdsNoteFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <div class="pds-note-wrap">
+      <textarea class="pds-note-area" id="pdsNoteArea" placeholder="Bu profile dair notlarınız..." spellcheck="false"></textarea>
+      <div class="pds-note-foot">
+        <span class="pds-note-count" id="pdsNoteCount">0 karakter</span>
+        <button type="button" class="btn-primary-action" id="pdsNoteSave">💾 Kaydet</button>
+      </div>
+    </div>
+  `;
+
+  const area = document.getElementById("pdsNoteArea");
+  const count = document.getElementById("pdsNoteCount");
+  const status = document.getElementById("pdsNoteStatus");
+  const updateCount = () => {
+    if (count && area) count.textContent = `${(area.value || "").length.toLocaleString()} karakter`;
+  };
+
+  if (!pdsState.note.loaded) {
+    if (area) area.disabled = true;
+    const data = await apiGet(`/api/instances/note?instance=${encodeURIComponent(pdsState.instanceId)}`, 10000);
+    if (area) area.disabled = false;
+    if (data && data.success && area) {
+      area.value = data.content || "";
+      pdsState.note.loaded = true;
+      pdsState.note.lastSaved = data.content || "";
+      pdsState.note.pending = data.content || "";
+      if (status) status.textContent = data.exists ? "Yüklendi" : "Yeni not";
+    } else if (status) {
+      status.textContent = "⚠️ Not alınamadı";
+    }
+  } else if (area) {
+    area.value = pdsState.note.lastSaved || "";
+    pdsState.note.pending = area.value;
+    if (status) status.textContent = "Kaydedildi";
+  }
+  updateCount();
+
+  if (area) {
+    area.addEventListener("input", () => {
+      updateCount();
+      pdsState.note.pending = area.value;
+      if (status) status.textContent = "Yazıyor...";
+      if (pdsState.note.timer) clearTimeout(pdsState.note.timer);
+      pdsState.note.timer = setTimeout(() => {
+        pdsState.note.timer = null;
+        pdsSaveNote(area.value, status);
+      }, 1500);
+    });
+  }
+
+  const saveBtn = document.getElementById("pdsNoteSave");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      if (pdsState.note.timer) {
+        clearTimeout(pdsState.note.timer);
+        pdsState.note.timer = null;
+      }
+      pdsSaveNote(area ? area.value : "", status);
+    });
+  }
+
+  const folderBtn = document.getElementById("pdsNoteFolder");
+  if (folderBtn) folderBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}`));
+}
+
+async function pdsSaveNote(content, statusEl) {
+  if (pdsState.note.saving) return;
+  pdsState.note.saving = true;
+  if (statusEl) statusEl.textContent = "Kaydediliyor...";
+  const data = await apiPost("/api/instances/note", {
+    instance: pdsState.instanceId,
+    content: content
+  }, 12000);
+  pdsState.note.saving = false;
+  if (data && data.success) {
+    pdsState.note.lastSaved = content;
+    pdsState.note.pending = content;
+    if (statusEl) statusEl.textContent = "✓ Kaydedildi";
+  } else if (statusEl) {
+    statusEl.textContent = `⚠️ ${(data && data.error) || "Kaydedilemedi"}`;
+  }
+}
+
+// ---------- Dünyalar ----------
+function pdsWorldIconUrl(worldName) {
+  return `${API_BASE}/api/instances/world/icon?instance=${encodeURIComponent(pdsState.instanceId)}` +
+    `&world=${encodeURIComponent(worldName)}`;
+}
+
+async function pdsRenderWorldsTab(pane) {
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">🌍 Dünyalar</h3>
+        <p class="pds-section-sub">Bu profildeki kayıtlı dünyalar. Kopyalayın veya silin.</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsWorldsRefresh">↻ Yenile</button>
+        <button type="button" class="btn-secondary" id="pdsWorldsFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <div class="pds-asset-list" id="pdsWorldsList">
+      <div class="pds-loading"><div class="spinner"></div><span>Dünyalar yükleniyor...</span></div>
+    </div>
+  `;
+
+  const refresh = document.getElementById("pdsWorldsRefresh");
+  if (refresh) refresh.addEventListener("click", () => pdsLoadWorlds(true));
+  const folder = document.getElementById("pdsWorldsFolder");
+  if (folder) folder.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/saves`));
+
+  pdsLoadWorlds(false);
+}
+
+async function pdsLoadWorlds(force) {
+  const wrap = document.getElementById("pdsWorldsList");
+  if (!wrap) return;
+  if (!force && pdsState.worlds !== null) return pdsRenderWorlds();
+
+  const data = await apiGet(`/api/instances/worlds?instance=${encodeURIComponent(pdsState.instanceId)}`, 20000);
+  if (!data || data.success !== true) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc((data && data.error) || "Dünya listesi alınamadı.")}</div>`;
+    return;
+  }
+  pdsState.worlds = Array.isArray(data.worlds) ? data.worlds : [];
+  pdsRenderWorlds();
+}
+
+function pdsRenderWorlds() {
+  const wrap = document.getElementById("pdsWorldsList");
+  if (!wrap) return;
+  const worlds = pdsState.worlds || [];
+  if (worlds.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">🌍 Henüz dünya yok.<br>Oyun içinden yeni bir dünya oluşturabilirsiniz.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  worlds.forEach(w => {
+    const row = document.createElement("div");
+    row.className = "pds-asset";
+
+    const icon = document.createElement("div");
+    icon.className = "pds-asset-icon";
+    icon.textContent = "🌍";
+    if (w.has_icon) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.loading = "lazy";
+      img.src = pdsWorldIconUrl(w.name);
+      img.addEventListener("error", () => { img.remove(); icon.textContent = "🌍"; });
+      icon.textContent = "";
+      icon.appendChild(img);
+    }
+
+    const info = document.createElement("div");
+    info.className = "pds-asset-info";
+    info.innerHTML = `
+      <div class="pds-asset-name" title="${pdsEsc(w.name)}">${pdsEsc(w.name)}</div>
+      <div class="pds-asset-meta">${Number(w.size_mb || 0).toFixed(1)} MB${w.last_played ? " • Son oynanma: " + pdsEsc(w.last_played) : ""}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "pds-item-actions";
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "pds-btn";
+    openBtn.textContent = "📂";
+    openBtn.title = "Klasörü Aç";
+    openBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/saves/${w.name}`));
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "pds-btn";
+    copyBtn.textContent = "📋 Kopyala";
+    copyBtn.title = "Dünyayı çoğalt";
+    copyBtn.addEventListener("click", () => pdsCopyWorld(w, copyBtn));
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "pds-btn pds-btn-danger";
+    delBtn.textContent = "🗑";
+    delBtn.title = "Sil";
+    delBtn.addEventListener("click", () => pdsDeleteWorld(w));
+
+    actions.appendChild(openBtn);
+    actions.appendChild(copyBtn);
+    actions.appendChild(delBtn);
+    row.appendChild(icon);
+    row.appendChild(info);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+async function pdsCopyWorld(world, buttonEl) {
+  const original = buttonEl ? buttonEl.textContent : "📋 Kopyala";
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kopyalanıyor..."; }
+  const data = await apiPost("/api/instances/world/copy", {
+    instance: pdsState.instanceId,
+    world: world.name
+  }, 120000);
+  if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original; }
+
+  if (data && data.success) {
+    showToast(`📋 Dünya kopyalandı: ${data.name}`, "success");
+    await pdsLoadWorlds(true);
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Dünya kopyalanamadı."}`, "error");
+  }
+}
+
+async function pdsDeleteWorld(world) {
+  const ok = await showConfirmDialog({
+    icon: "🗑️",
+    title: "Dünya Silinsin mi?",
+    message: `"${world.name}" dünyası ve içindeki tüm kayıtlar kalıcı olarak silinecek. Bu işlem geri alınamaz.`,
+    okText: "Sil",
+    danger: true
+  });
+  if (!ok) return;
+
+  const data = await apiPost("/api/instances/world/delete", {
+    instance: pdsState.instanceId,
+    world: world.name
+  }, 30000);
+  if (data && data.success) {
+    showToast(`🗑️ ${world.name} silindi.`, "success");
+    await pdsLoadWorlds(true);
+  } else {
+    showToast(`⚠️ ${(data && data.error) || "Dünya silinemedi."}`, "error");
+  }
+}
+
+// ---------- Sunucular ----------
+async function pdsRenderServersTab(pane) {
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">🌐 Sunucular</h3>
+        <p class="pds-section-sub">servers.dat içindeki kayıtlı sunucular (oyun içinden eklenir).</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsServersRefresh">↻ Yenile</button>
+        <button type="button" class="btn-secondary" id="pdsServersFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <div class="pds-asset-list" id="pdsServersList">
+      <div class="pds-loading"><div class="spinner"></div><span>Sunucular yükleniyor...</span></div>
+    </div>
+  `;
+
+  const refresh = document.getElementById("pdsServersRefresh");
+  if (refresh) refresh.addEventListener("click", () => pdsLoadServers(true));
+  const folder = document.getElementById("pdsServersFolder");
+  if (folder) folder.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}`));
+
+  pdsLoadServers(false);
+}
+
+async function pdsLoadServers(force) {
+  const wrap = document.getElementById("pdsServersList");
+  if (!wrap) return;
+  if (!force && pdsState.servers !== null) return pdsRenderServers();
+
+  const data = await apiGet(`/api/instances/servers?instance=${encodeURIComponent(pdsState.instanceId)}`, 15000);
+  if (!data || data.success !== true) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc((data && data.error) || "Sunucu listesi alınamadı.")}</div>`;
+    return;
+  }
+  pdsState.servers = Array.isArray(data.servers) ? data.servers : [];
+  pdsRenderServers();
+}
+
+function pdsRenderServers() {
+  const wrap = document.getElementById("pdsServersList");
+  if (!wrap) return;
+  const servers = pdsState.servers || [];
+  if (servers.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">🌐 Sunucu listesi boş (oyun içinden eklenir).</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  servers.forEach(srv => {
+    const row = document.createElement("div");
+    row.className = "pds-asset";
+
+    const icon = document.createElement("div");
+    icon.className = "pds-asset-icon";
+    icon.textContent = "🌐";
+
+    const info = document.createElement("div");
+    info.className = "pds-asset-info";
+    info.innerHTML = `
+      <div class="pds-asset-name" title="${pdsEsc(srv.name)}">${pdsEsc(srv.name || "İsimsiz sunucu")}</div>
+      <div class="pds-asset-meta pds-asset-ip" title="${pdsEsc(srv.ip)}">${pdsEsc(srv.ip || "")}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "pds-item-actions";
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "pds-btn";
+    copyBtn.textContent = "📋 IP'yi Kopyala";
+    copyBtn.addEventListener("click", () => pdsCopyText(srv.ip || ""));
+
+    actions.appendChild(copyBtn);
+    row.appendChild(icon);
+    row.appendChild(info);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+// ---------- Ekran Görüntüleri ----------
+function pdsShotUrl(shot) {
+  return `${API_BASE}/api/instances/screenshot/file?instance=${encodeURIComponent(pdsState.instanceId)}` +
+    `&name=${encodeURIComponent(shot.name)}&t=${Math.round(shot.mtime || 0)}`;
+}
+
+async function pdsRenderProfileShotsTab(pane) {
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">📸 Ekran Görüntüleri</h3>
+        <p class="pds-section-sub">Bu profilde alınan ekran görüntüleri (screenshots/).</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsShotsRefresh">↻ Yenile</button>
+        <button type="button" class="btn-secondary" id="pdsShotsFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <div class="pds-shot-grid" id="pdsShotsGrid">
+      <div class="pds-loading" style="grid-column: 1/-1;"><div class="spinner"></div><span>Görüntüler yükleniyor...</span></div>
+    </div>
+  `;
+
+  const refresh = document.getElementById("pdsShotsRefresh");
+  if (refresh) refresh.addEventListener("click", () => pdsLoadProfileShots(true));
+  const folder = document.getElementById("pdsShotsFolder");
+  if (folder) folder.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/screenshots`));
+
+  pdsLoadProfileShots(false);
+}
+
+async function pdsLoadProfileShots(force) {
+  const wrap = document.getElementById("pdsShotsGrid");
+  if (!wrap) return;
+  if (!force && pdsState.shots !== null) return pdsRenderProfileShots();
+
+  const data = await apiGet(`/api/instances/screenshots?instance=${encodeURIComponent(pdsState.instanceId)}`, 15000);
+  if (!data || data.success !== true) {
+    wrap.innerHTML = `<div class="pds-empty" style="grid-column: 1/-1;">⚠️ ${pdsEsc((data && data.error) || "Ekran görüntüleri alınamadı.")}</div>`;
+    return;
+  }
+  pdsState.shots = Array.isArray(data.screenshots) ? data.screenshots : [];
+  pdsRenderProfileShots();
+}
+
+function pdsRenderProfileShots() {
+  const wrap = document.getElementById("pdsShotsGrid");
+  if (!wrap) return;
+  const shots = pdsState.shots || [];
+  if (shots.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty" style="grid-column: 1/-1;">📸 Henüz ekran görüntüsü yok.<br>Oyunda F2 tuşuna basarak alabilirsiniz.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  shots.forEach(shot => {
+    const card = document.createElement("div");
+    card.className = "pds-shot-card";
+    const url = pdsShotUrl(shot);
+    card.innerHTML = `
+      <div class="pds-shot-thumb"><img alt="" loading="lazy" src="${pdsEsc(url)}"></div>
+      <div class="pds-shot-meta">
+        <span title="${pdsEsc(shot.name)}">${pdsEsc(shot.name)}</span>
+        <span>${Math.max(1, Math.round((shot.size || 0) / 1024))} KB</span>
+      </div>
+    `;
+    const img = card.querySelector("img");
+    if (img) img.addEventListener("error", () => { img.remove(); card.querySelector(".pds-shot-thumb").textContent = "📸"; });
+    card.addEventListener("click", () => pdsOpenLightbox(url));
+    wrap.appendChild(card);
+  });
+}
+
+function pdsOpenLightbox(url) {
+  const lb = document.getElementById("pdsLightbox");
+  const img = document.getElementById("pdsLightboxImg");
+  if (!lb || !img) return;
+  img.src = url;
+  lb.classList.add("show");
+  lb.setAttribute("aria-hidden", "false");
+}
+
+function pdsCloseLightbox() {
+  const lb = document.getElementById("pdsLightbox");
+  const img = document.getElementById("pdsLightboxImg");
+  if (img) img.removeAttribute("src");
+  if (lb) {
+    lb.classList.remove("show");
+    lb.setAttribute("aria-hidden", "true");
+  }
+}
+
+// ---------- Diğer Kayıtlar ----------
+async function pdsRenderOtherLogsTab(pane) {
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">🗄️ Diğer Kayıtlar</h3>
+        <p class="pds-section-sub">crash-reports ve logs klasöründeki kayıt dosyaları. Son 200 satır görüntülenebilir.</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsOtherRefresh">↻ Yenile</button>
+        <button type="button" class="btn-secondary" id="pdsOtherFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <div class="pds-asset-list" id="pdsOtherLogsList">
+      <div class="pds-loading"><div class="spinner"></div><span>Kayıtlar yükleniyor...</span></div>
+    </div>
+  `;
+
+  const refresh = document.getElementById("pdsOtherRefresh");
+  if (refresh) refresh.addEventListener("click", () => pdsLoadOtherLogs(true));
+  const folder = document.getElementById("pdsOtherFolder");
+  if (folder) folder.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/logs`));
+
+  pdsLoadOtherLogs(false);
+}
+
+async function pdsLoadOtherLogs(force) {
+  const wrap = document.getElementById("pdsOtherLogsList");
+  if (!wrap) return;
+  if (!force && pdsState.otherLogs !== null) return pdsRenderOtherLogs();
+
+  const data = await apiGet(`/api/instances/logs?instance=${encodeURIComponent(pdsState.instanceId)}`, 15000);
+  if (!data || data.success !== true) {
+    wrap.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc((data && data.error) || "Kayıt listesi alınamadı.")}</div>`;
+    return;
+  }
+  pdsState.otherLogs = Array.isArray(data.files) ? data.files : [];
+  pdsRenderOtherLogs();
+}
+
+function pdsRenderOtherLogs() {
+  const wrap = document.getElementById("pdsOtherLogsList");
+  if (!wrap) return;
+  const files = pdsState.otherLogs || [];
+  if (files.length === 0) {
+    wrap.innerHTML = `<div class="pds-empty">🗄️ Kayıt dosyası yok.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = "";
+  files.forEach(f => {
+    const row = document.createElement("div");
+    row.className = "pds-asset";
+
+    const icon = document.createElement("div");
+    icon.className = "pds-asset-icon";
+    icon.textContent = f.dir === "crash-reports" ? "💥" : "📄";
+
+    const info = document.createElement("div");
+    info.className = "pds-asset-info";
+    info.innerHTML = `
+      <div class="pds-asset-name" title="${pdsEsc(f.name)}">${pdsEsc(f.name)}</div>
+      <div class="pds-asset-meta">${pdsEsc(f.dir)}/ • ${Number(f.size_kb || 0).toFixed(1)} KB • ${pdsEsc(f.modified || "")}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "pds-item-actions";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "pds-btn";
+    viewBtn.textContent = "👁 Görüntüle";
+    viewBtn.addEventListener("click", () => pdsOpenLogViewer(f));
+
+    const folderBtn = document.createElement("button");
+    folderBtn.type = "button";
+    folderBtn.className = "pds-btn";
+    folderBtn.textContent = "📂";
+    folderBtn.title = "Klasörü Aç";
+    folderBtn.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${f.dir}`));
+
+    actions.appendChild(viewBtn);
+    actions.appendChild(folderBtn);
+    row.appendChild(icon);
+    row.appendChild(info);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+async function pdsOpenLogViewer(file) {
+  const pane = document.querySelector(".pds-pane");
+  if (!pane) return;
+  pane.innerHTML = `
+    <div class="pds-section-head">
+      <div>
+        <h3 class="pds-section-title">📄 ${pdsEsc(file.name)}</h3>
+        <p class="pds-section-sub">${pdsEsc(file.dir)}/ • son 200 satır</p>
+      </div>
+      <div class="pds-head-actions">
+        <button type="button" class="btn-secondary" id="pdsLogViewerBack">← Geri</button>
+        <button type="button" class="btn-secondary" id="pdsLogViewerFolder">📂 Klasörü Aç</button>
+      </div>
+    </div>
+    <pre class="pds-log" id="pdsLogViewerOut">Kayıt yükleniyor...</pre>
+  `;
+
+  const back = document.getElementById("pdsLogViewerBack");
+  if (back) back.addEventListener("click", () => pdsRenderOtherLogsTab(pane));
+  const folder = document.getElementById("pdsLogViewerFolder");
+  if (folder) folder.addEventListener("click", () => openSystemFolder(`instances/${pdsState.instanceId}/${file.dir}`));
+
+  const out = document.getElementById("pdsLogViewerOut");
+  const data = await apiGet(
+    `/api/instances/log/file?instance=${encodeURIComponent(pdsState.instanceId)}` +
+    `&dir=${encodeURIComponent(file.dir)}&name=${encodeURIComponent(file.name)}`,
+    20000
+  );
+  if (!out) return;
+  if (data && data.success && Array.isArray(data.lines)) {
+    out.textContent = data.lines.length ? data.lines.join("\n") : "Kayıt boş.";
+    out.scrollTop = out.scrollHeight;
+  } else {
+    out.textContent = `⚠️ ${(data && data.error) || "Kayıt okunamadı."}`;
   }
 }
