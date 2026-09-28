@@ -14,6 +14,7 @@ import json
 import re
 import time
 import gzip
+import hashlib
 import struct
 import shutil
 import socket
@@ -1567,8 +1568,229 @@ def install_required_dependencies(inst_id, target_dir, game_version, loader,
     return result
 
 
+# ==================== HASH ILE MODRINTH KIMLIK TESPITI ====================
+# Modpack'lerin index'e KAYDETMEDEN indirdigi jar'lar icin son care: dosya
+# SHA1'ini Modrinth'e toplu sorup projeyi kesin olarak cozer. Sonuc per-instance
+# onbellege yazilir; (size, mtime) degismedikce dosya yeniden hash'lenmez.
+MODRINTH_HASHES_FILE = ".modrinth_hashes.json"
+HASH_LOOKUP_BATCH = 100
+HASH_READ_CHUNK = 1024 * 1024
+
+
+def _sha1_file(path):
+    digest = hashlib.sha1()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(HASH_READ_CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_modrinth_hashes(inst_id):
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir:
+        return {}
+    path = os.path.join(inst_dir, MODRINTH_HASHES_FILE)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
+
+
+def save_modrinth_hashes(inst_id, data):
+    inst_dir = get_instance_dir(inst_id)
+    if not inst_dir or not isinstance(data, dict):
+        return
+    try:
+        tmp = os.path.join(inst_dir, MODRINTH_HASHES_FILE + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, os.path.join(inst_dir, MODRINTH_HASHES_FILE))
+    except Exception:
+        pass
+
+
+def identify_installed_by_hash(instance_id, category="mod"):
+    """Kategori klasorundeki dosyalari SHA1 ile Modrinth'te toplu tanimlar.
+
+    `.disabled` ile biten dosyalar da dahildir (hash dosyanin kendisi uzerinden
+    hesaplanir; sonuc anahtari `.disabled` eki atilmis addir). Ag hatasinda
+    `set_net_error` + `log_error` ile bildirilir ve elde olan onbellek kadariyla
+    bos/eksik sozluk donerek uygulamanin cokmesi engellenir.
+    Donen: {dosya_adi: {project_id, slug, version_number, title, version_id,
+    required_deps, disabled}}. `required_deps` Modrinth yanitindan gelir ve
+    sonraki taramalarda ek surum sorgusu yapilmasini onler.
+    """
+    result = {}
+    inst_dir = get_instance_dir(instance_id)
+    if not inst_dir:
+        return result
+
+    cat = normalize_category(category)
+    cat_dir = os.path.join(inst_dir, CATEGORY_DIRS[cat])
+    if not os.path.isdir(cat_dir):
+        return result
+
+    try:
+        names = sorted(os.listdir(cat_dir))
+    except Exception as e:
+        log_error(f"Hash tespiti dosya listesi hatası ({instance_id}): {type(e).__name__}: {e}")
+        return result
+
+    cache = load_modrinth_hashes(instance_id)
+    if not isinstance(cache, dict):
+        cache = {}
+
+    files = []
+    for name in names:
+        fp = os.path.join(cat_dir, name)
+        if not os.path.isfile(fp):
+            continue
+        if cat == "mod":
+            low = name.lower()
+            if not (low.endswith(".jar") or low.endswith(".jar.disabled")):
+                continue
+        files.append(name)
+
+    dirty = False
+    pending = {}  # sha1 -> [dosya adi, ...]
+    for name in files:
+        fp = os.path.join(cat_dir, name)
+        try:
+            st = os.stat(fp)
+        except OSError:
+            continue
+        entry = cache.get(name)
+        fresh = (
+            isinstance(entry, dict)
+            and bool(entry.get("sha1"))
+            and entry.get("size") == st.st_size
+            and entry.get("mtime") == st.st_mtime
+        )
+        if not fresh:
+            try:
+                sha1 = _sha1_file(fp)
+            except Exception as e:
+                log_error(f"Dosya hash'lenemedi ({name}): {type(e).__name__}: {e}")
+                continue
+            entry = {
+                "sha1": sha1,
+                "size": st.st_size,
+                "mtime": st.st_mtime,
+                "project_id": "",
+                "slug": "",
+                "version_number": "",
+                "title": "",
+            }
+            cache[name] = entry
+            dirty = True
+        if not entry.get("project_id") or not isinstance(entry.get("required_deps"), list):
+            pending.setdefault(entry["sha1"], []).append(name)
+
+    # Modrinth /version_files: 100'luk gruplar hâlinde toplu sorgu
+    hashes = list(pending.keys())
+    for i in range(0, len(hashes), HASH_LOOKUP_BATCH):
+        chunk = hashes[i:i + HASH_LOOKUP_BATCH]
+        try:
+            resp = requests.post(
+                f"{ModrinthFetcher.BASE_URL}/version_files",
+                json={"hashes": chunk, "algorithm": "sha1"},
+                headers=ModrinthFetcher.HEADERS,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            versions = resp.json()
+            if not isinstance(versions, dict):
+                versions = {}
+        except Exception as e:
+            set_net_error("modrinth_version_files", e)
+            log_error(f"Modrinth hash sorgusu başarısız: {type(e).__name__}: {e}")
+            continue
+
+        project_ids = []
+        for sha1 in chunk:
+            version = versions.get(sha1)
+            if not isinstance(version, dict):
+                continue
+            pid = str(version.get("project_id") or "")
+            if not pid:
+                continue
+            if pid not in project_ids:
+                project_ids.append(pid)
+            req_deps = []
+            for dep in version.get("dependencies") or []:
+                if not isinstance(dep, dict):
+                    continue
+                if str(dep.get("dependency_type") or "required") != "required":
+                    continue
+                req_deps.append({
+                    "project_id": str(dep.get("project_id") or ""),
+                    "version_id": str(dep.get("version_id") or ""),
+                    "file_name": str(dep.get("file_name") or ""),
+                })
+            for name in pending.get(sha1, []):
+                entry = cache.get(name)
+                if not isinstance(entry, dict):
+                    continue
+                entry["project_id"] = pid
+                entry["version_number"] = str(version.get("version_number") or "")
+                entry["title"] = str(version.get("name") or "")
+                entry["version_id"] = str(version.get("id") or "")
+                entry["required_deps"] = req_deps
+                dirty = True
+
+        if project_ids:
+            projects = fetch_modrinth_projects_batch(project_ids)
+            for sha1 in chunk:
+                version = versions.get(sha1)
+                if not isinstance(version, dict):
+                    continue
+                info = projects.get(str(version.get("project_id") or "")) or {}
+                for name in pending.get(sha1, []):
+                    entry = cache.get(name)
+                    if not isinstance(entry, dict):
+                        continue
+                    entry["slug"] = str(info.get("slug") or "")
+                    entry["title"] = str(info.get("title") or entry.get("title") or "")
+                    dirty = True
+
+    if dirty:
+        save_modrinth_hashes(instance_id, cache)
+
+    for name in files:
+        entry = cache.get(name)
+        if not isinstance(entry, dict):
+            continue
+        base = name[:-len(".disabled")] if name.lower().endswith(".disabled") else name
+        result[base] = {
+            "project_id": str(entry.get("project_id") or ""),
+            "slug": str(entry.get("slug") or ""),
+            "version_number": str(entry.get("version_number") or ""),
+            "title": str(entry.get("title") or ""),
+            "version_id": str(entry.get("version_id") or ""),
+            "required_deps": entry.get("required_deps") if isinstance(entry.get("required_deps"), list) else [],
+            "disabled": name.lower().endswith(".disabled"),
+        }
+    return result
+
+
 def compute_missing_dependencies(inst_id):
-    """Profilde kurulu modlarin zorunlu bagimliliklarindan eksik olanlari listeler."""
+    """Profilde kurulu modlarin zorunlu bagimliliklarindan eksik olanlari listeler.
+
+    Kurulu proje kumesi UC kaynaktan birlestirilir:
+      1) `.modrinth_index.json` (project_id + slug),
+      2) yeni SHA1 hash tespiti (project_id + slug),
+      3) dosya adinda bagimlilik slug'i gecmesi (normalize fallback).
+    """
     inst = load_instance_config(inst_id)
     if not inst:
         return {"success": False, "error": "Profil bulunamadı."}
@@ -1579,6 +1801,12 @@ def compute_missing_dependencies(inst_id):
     mods_dir = os.path.join(inst_dir, "mods")
     manifest = load_content_manifest(inst_id).get("mod") or {}
     index = load_modrinth_index(inst_id)
+    hashed = identify_installed_by_hash(inst_id, "mod")
+
+    identified_by_hash = sum(
+        1 for entry in hashed.values()
+        if isinstance(entry, dict) and entry.get("project_id")
+    )
 
     by_filename = {}
     for slug, entry in manifest.items():
@@ -1587,6 +1815,7 @@ def compute_missing_dependencies(inst_id):
 
     installed_files = set()
     mod_files = []
+    disabled_installed = 0
     if os.path.isdir(mods_dir):
         try:
             for f in os.listdir(mods_dir):
@@ -1594,34 +1823,103 @@ def compute_missing_dependencies(inst_id):
                 if os.path.isfile(fp) and f.lower().endswith((".jar", ".jar.disabled")):
                     installed_files.add(f.lower())
                     mod_files.append(f)
+                    if f.lower().endswith(".disabled"):
+                        disabled_installed += 1
         except Exception:
             pass
 
+    def norm_token(value):
+        return re.sub(r"[-_\s]+", "", str(value or "").lower())
+
+    def file_present(filename):
+        f = str(filename or "").lower()
+        if not f:
+            return False
+        return f in installed_files or (f + ".disabled") in installed_files
+
     installed_pids = set()
     installed_vids = set()
-    for entry in index.values():
+    installed_slugs = set()
+
+    def add_pid(pid):
+        p = str(pid or "").lower()
+        if p:
+            installed_pids.add(p)
+
+    def add_vid(vid):
+        v = str(vid or "").lower()
+        if v:
+            installed_vids.add(v)
+
+    def add_slug(slug):
+        s = norm_token(slug)
+        if s:
+            installed_slugs.add(s)
+
+    # Kaynak 1: content manifest (kurulu dosyasi diskte olanlar)
+    for slug, entry in manifest.items():
+        filename = entry.get("filename") if isinstance(entry, dict) else ""
+        if filename and not file_present(filename):
+            continue
+        add_slug(slug)
         if isinstance(entry, dict):
-            if entry.get("project_id"):
-                installed_pids.add(str(entry["project_id"]))
-            if entry.get("version_id"):
-                installed_vids.add(str(entry["version_id"]))
+            add_pid(entry.get("project_id"))
+            add_vid(entry.get("version_id"))
+
+    # Kaynak 1b: modrinth index (kurulu dosyasi diskte olanlar; .disabled dahil)
+    for slug, entry in index.items():
+        filename = entry.get("filename") if isinstance(entry, dict) else ""
+        if filename and not file_present(filename):
+            continue
+        add_slug(slug)
+        if isinstance(entry, dict):
+            add_pid(entry.get("project_id"))
+            add_vid(entry.get("version_id"))
+
+    # Kaynak 2: hash tespiti (yalnizca diskte olan dosyalar sonuca girer)
+    for entry in hashed.values():
+        if isinstance(entry, dict):
+            add_pid(entry.get("project_id"))
+            add_vid(entry.get("version_id"))
+            add_slug(entry.get("slug"))
+
+    installed_norm_names = [norm_token(f) for f in mod_files]
 
     unidentified = 0
     checked_pids = set()
-    missing_pids = {}
+    candidate_deps = {}
 
     for fname in mod_files:
         base = fname[:-len(".disabled")] if fname.lower().endswith(".disabled") else fname
         slug_info = by_filename.get(base.lower())
-        if not slug_info:
-            unidentified += 1  # kurulum kaydi yok: projeyi tahmin etme, atla
-            continue
-        slug, entry = slug_info
-        index_entry = index.get(slug)
-        index_entry = index_entry if isinstance(index_entry, dict) else {}
-        project_id = str(index_entry.get("project_id") or entry.get("project_id") or "")
-        version_id = str(index_entry.get("version_id") or entry.get("version_id") or "")
+        hash_info = hashed.get(base) or {}
+        slug = ""
+        entry = {}
+        project_id = ""
+        version_id = ""
+        version_number = ""
 
+        if slug_info:
+            slug, entry = slug_info
+            index_entry = index.get(slug)
+            index_entry = index_entry if isinstance(index_entry, dict) else {}
+            project_id = str(index_entry.get("project_id") or entry.get("project_id") or "")
+            version_id = str(index_entry.get("version_id") or entry.get("version_id") or "")
+            version_number = str(entry.get("version") or "")
+
+        if hash_info:
+            if not project_id:
+                project_id = str(hash_info.get("project_id") or "")
+            if not version_id:
+                version_id = str(hash_info.get("version_id") or "")
+            if not version_number:
+                version_number = str(hash_info.get("version_number") or "")
+            if not slug:
+                slug = str(hash_info.get("slug") or "")
+
+        if not project_id and not slug:
+            unidentified += 1  # kurulum kaydi ve hash tespiti yok: atla
+            continue
         if not project_id:
             project = fetch_modrinth_project(slug)
             project_id = str(project.get("id") or "")
@@ -1631,26 +1929,32 @@ def compute_missing_dependencies(inst_id):
         if project_id in checked_pids:
             continue
         checked_pids.add(project_id)
-        installed_pids.add(project_id)
+        add_pid(project_id)
+        add_slug(slug)
 
-        version = fetch_modrinth_version(version_id) if version_id else None
-        if version is None:
-            candidates = fetch_modrinth_project_versions(project_id, game_version, loader)
-            wanted = str(entry.get("version") or "")
-            if wanted:
-                version = next(
-                    (v for v in candidates if str(v.get("version_number") or "") == wanted),
-                    None,
-                )
-            if version is None and candidates:
-                version = candidates[0]
-        if version is None:
-            unidentified += 1
-            continue
+        required_deps = None
+        if hash_info and isinstance(hash_info.get("required_deps"), list):
+            # Hash tespiti (/version_files) yanitindan gelen kesin bagimliliklar;
+            # ek surum sorgusu gerekmez.
+            required_deps = [d for d in hash_info["required_deps"] if isinstance(d, dict)]
 
-        for dep in version.get("dependencies") or []:
-            if not isinstance(dep, dict):
+        if required_deps is None:
+            version = fetch_modrinth_version(version_id) if version_id else None
+            if version is None:
+                versions = fetch_modrinth_project_versions(project_id, game_version, loader)
+                if version_number:
+                    version = next(
+                        (v for v in versions if str(v.get("version_number") or "") == version_number),
+                        None,
+                    )
+                if version is None and versions:
+                    version = versions[0]
+            if version is None:
+                unidentified += 1
                 continue
+            required_deps = [d for d in (version.get("dependencies") or []) if isinstance(d, dict)]
+
+        for dep in required_deps:
             if str(dep.get("dependency_type") or "required") != "required":
                 continue
             dep_pid = str(dep.get("project_id") or "")
@@ -1661,19 +1965,27 @@ def compute_missing_dependencies(inst_id):
                     dep_pid = str(dep_version.get("project_id") or "")
             if not dep_pid:
                 continue
-            if dep_pid in installed_pids:
+            if dep_pid.lower() in installed_pids:
                 continue
-            if dep_vid and dep_vid in installed_vids:
+            if dep_vid and dep_vid.lower() in installed_vids:
                 continue
             dep_file = str(dep.get("file_name") or "")
             if dep_file and dep_file.lower() in installed_files:
                 continue
-            missing_pids[dep_pid] = True
+            candidate_deps.setdefault(dep_pid, True)
 
-    projects = fetch_modrinth_projects_batch(list(missing_pids.keys()))
+    projects = fetch_modrinth_projects_batch(list(candidate_deps.keys()))
     missing = []
-    for pid in missing_pids:
+    for pid in candidate_deps:
         info = projects.get(pid) or {}
+        dep_slug = str(info.get("slug") or "")
+        if dep_slug:
+            token = norm_token(dep_slug)
+            if token and token in installed_slugs:
+                continue
+            # Kaynak 3: kurulu dosya adlarinda bagimlilik slug'i geciyor mu?
+            if token and any(token in name for name in installed_norm_names):
+                continue
         missing.append({
             "slug": info.get("slug") or pid,
             "title": info.get("title") or info.get("slug") or pid,
@@ -1685,6 +1997,8 @@ def compute_missing_dependencies(inst_id):
         "instance": inst_id,
         "missing": missing,
         "unidentified": unidentified,
+        "disabled_installed": disabled_installed,
+        "identified_by_hash": identified_by_hash,
     }
 
 
