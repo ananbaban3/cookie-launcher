@@ -84,8 +84,11 @@ cookie-launcher-tauri/
 
 - **Windows:** Kurulum (.exe) — gömülü çekirdek sayesinde Python gerekmez.
 - **Linux:** AppImage / .deb / .rpm.
-- **macOS:** .dmg (Apple Silicon + Intel) — **deneysel ve imzasız** (Gatekeeper uyarısı verir;
-  sağ tık → Aç veya `xattr -dr com.apple.quarantine` gerekir).
+- **macOS:** .dmg (Apple Silicon + Intel) — **deneysel ve imzasız**. Apple Developer üyeliği
+  (99 $/yıl) karşılanamadığı için notarize edilmemiştir. **Sağ tık → Aç macOS 15+ üzerinde artık
+  çalışmaz**; ya `xattr -dr com.apple.quarantine /Applications/CookieLauncher.app` komutunu
+  çalıştırın ya da Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç" deyin. Kaynak koddan
+  kendiniz de derleyebilirsiniz (GPL-3.0).
 - Reklam ve telemetri yoktur; site ve uygulama hiçbir kişisel veri toplamaz.
 - Minecraft, Mojang Synergies AB'nin ticari markasıdır. Bu proje Mojang/Microsoft veya
   Fabric/Forge/NeoForge/Quilt/Modrinth ile bağlantılı, sponsorlu ya da onaylı değildir;

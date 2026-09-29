@@ -78,10 +78,13 @@ jobs:
             - **Linux:** AppImage / .deb / .rpm
             - **macOS:** .dmg (Apple Silicon) ve .dmg (Intel) — *deneysel*
 
-            > **macOS notu:** DMG paketleri imzasız ve notarize edilmemiştir (Apple Developer
-            > sertifikası yok), bu yüzden Gatekeeper uyarı verebilir. Açmak için uygulamaya
-            > sağ tık → **Aç** yapın ya da şu komutu çalıştırın:
+            > **macOS notu:** DMG paketleri imzasız ve notarize edilmemiştir; nedeni Apple Developer
+            > Program üyeliğinin (**99 $/yıl**) karşılanamamasıdır. İlk açılışta Gatekeeper
+            > "geliştirici doğrulanamıyor" uyarısı verir. **Sağ tık → "Aç" macOS 15 (Sequoia) ve
+            > sonrasında artık çalışmaz.** Şu iki yoldan birini kullanın: (1) Terminal:
             > `xattr -dr com.apple.quarantine /Applications/CookieLauncher.app`
+            > (2) Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç".
+            > Uygulama GPL-3.0 açık kaynaktır; dileyen kaynak koddan derleyebilir.
             > macOS derlemeleri geliştirici tarafından test edilmemiştir; sorun bildirirseniz seviniriz.
 
             Mod kaynağı Modrinth'tir. Minecraft, Mojang Synergies AB'nin ticari markasıdır;
