@@ -4284,7 +4284,10 @@ function vswRenderList(opts = {}) {
     list.appendChild(row);
   });
 
-  if (vswState.truncated) {
+  // Kesilme bilgisi yalnizca TUM liste goruntulenirken anlamli. Uyumsuzlar
+  // gizliyken (varsayilan) tek uyumlu surumun altinda "200 surum gosteriliyor"
+  // demek kafa karistiriyordu (kullanici geri bildirimi).
+  if (vswState.truncated && vswShowIncompatiblePref()) {
     const note = document.createElement("div");
     note.className = "vsw-truncated-note";
     note.textContent = `ℹ️ Çok fazla sürüm var; en yeni 200 sürüm gösteriliyor.`;
