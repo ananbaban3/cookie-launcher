@@ -538,10 +538,9 @@
               <h3 class="text-lg font-bold text-white mt-2">macOS DMG (arm64)</h3>
               <p class="text-xs text-slate-400 mt-1">Apple Silicon işlemcili Mac'ler için disk imajı. Gömülü Python çekirdeğiyle birlikte gelir.</p>
             </div>
-            <a href="https://github.com/cookie-launcher/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
-               class="mt-6 w-full py-3 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center text-sm transition-all">
-              İndir (.dmg · arm64)
-            </a>
+            <button type="button" onclick="openMacWarning('arm64')" class="mt-6 w-full py-3 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center text-sm transition-all cursor-pointer">
+                İndir (.dmg · arm64)
+              </button>
           </div>
 
           <!-- Intel -->
@@ -554,10 +553,9 @@
               <h3 class="text-lg font-bold text-white mt-2">macOS DMG (x64)</h3>
               <p class="text-xs text-slate-400 mt-1">Intel işlemcili Mac'ler için disk imajı. Gömülü Python çekirdeğiyle birlikte gelir.</p>
             </div>
-            <a href="https://github.com/cookie-launcher/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer"
-               class="mt-6 w-full py-3 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center text-sm transition-all">
-              İndir (.dmg · x64)
-            </a>
+            <button type="button" onclick="openMacWarning('x64')" class="mt-6 w-full py-3 rounded-xl font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center text-sm transition-all cursor-pointer">
+                İndir (.dmg · x64)
+              </button>
           </div>
         </div>
 
@@ -567,11 +565,13 @@
             <span class="text-xl" aria-hidden="true">⚠️</span>
             <div class="text-xs text-slate-300 leading-relaxed space-y-2">
               <p class="font-bold text-cookie-400">Deneysel: imzasız ve notarize edilmemiş</p>
-              <p>macOS paketleri Apple Developer sertifikası olmadan derlenir; bu yüzden macOS <strong>Gatekeeper</strong> "geliştirici doğrulanamıyor" uyarısı verebilir. Bu bir virüs işareti değil, imza eksikliğidir. Açmak için:</p>
-              <ol class="list-decimal pl-5 space-y-1">
-                <li>Uygulamaya <strong>sağ tıklayıp "Aç"</strong> seçin (ilk açılışta bir kez yeterlidir), veya</li>
-                <li>Terminalde şunu çalıştırın: <code class="font-mono text-cookie-300">xattr -dr com.apple.quarantine /Applications/CookieLauncher.app</code></li>
-              </ol>
+              <p>macOS paketleri Apple Developer sertifikası olmadan derlenir; bu yüzden macOS <strong>Gatekeeper</strong> "geliştirici doğrulanamıyor" uyarısı verir. Bu bir virüs işareti değil, imza eksikliğidir. <strong class="text-white">İlk açılışta aşağıdakilerden birini yapmak zorunludur:</strong></p>
+                <p class="text-amber-300"><strong>⚠️ Sağ tık → "Aç" yöntemi macOS 15 (Sequoia) ve sonrasında artık çalışmıyor.</strong> Aşağıdaki iki yoldan birini kullanmalısınız.</p>
+                <ol class="list-decimal pl-5 space-y-1">
+                  <li><strong class="text-white">Hızlı yol (Terminal):</strong> DMG'yi açıp uygulamayı <code>/Applications</code>'a taşıyın, sonra Terminal'de şunu çalıştırın:<br><code class="font-mono text-cookie-300">xattr -dr com.apple.quarantine /Applications/CookieLauncher.app</code></li>
+                  <li><strong class="text-white">Arayüzden:</strong> uygulamayı açmayı deneyin → uyarı gelince <em>Sistem Ayarları → Gizlilik ve Güvenlik</em> bölümüne inin → güvenlik bildiriminde <strong>"Yine de Aç"</strong> → çıkan pencerede tekrar <strong>Aç</strong>.</li>
+                </ol>
+                <p><strong class="text-white">Neden imzalı değil?</strong> Apple Developer Program üyeliği <strong>99 $/yıl</strong> ve bunu karşılayamıyorum. Uygulama tamamen açık kaynak (GPL-3.0); istemeyen <a href="https://github.com/cookie-launcher/cookie-launcher" target="_blank" rel="noopener noreferrer" class="text-cookie-400 underline underline-offset-2">kaynak koddan kendisi derleyebilir</a>.</p>
               <p>Paketler GitHub Actions'ın macOS runner'larında üretilir. Geliştiricinin elinde Mac donanımı olmadığı için <strong>çalışma zamanı test edilmemiştir</strong>; sorun yaşarsan <a href="https://github.com/cookie-launcher/cookie-launcher/issues" target="_blank" rel="noopener noreferrer" class="text-cookie-400 underline underline-offset-2">Issues</a>'a bildir.</p>
             </div>
           </div>
@@ -605,7 +605,7 @@
             <span class="text-cookie-400 font-mono text-lg icon">+</span>
           </button>
           <div class="faq-content hidden px-4 pb-4 text-xs sm:text-sm text-slate-400 leading-relaxed border-t border-surface-border/60 pt-3">
-            İndirme Merkezi'ndeki macOS sekmesinden Apple Silicon (arm64) ve Intel (x64) DMG paketlerine ulaşabilirsiniz. Paketler imzasız olduğu için ilk açılışta Gatekeeper uyarısı verebilir; sağ tık → "Aç" veya <span class="font-mono text-cookie-300">xattr -dr com.apple.quarantine</span> komutuyla açılır.
+            İndirme Merkezi'ndeki macOS sekmesinden Apple Silicon (arm64) ve Intel (x64) DMG paketlerine ulaşabilirsiniz. Paketler imzasız/notarize edilmemiş olduğu için ilk açılışta Gatekeeper uyarısı verir; <strong class="text-slate-200">sağ tık → "Aç" macOS 15+ üzerinde artık çalışmaz.</strong> Ya <span class="font-mono text-cookie-300">xattr -dr com.apple.quarantine /Applications/CookieLauncher.app</span> komutunu çalıştırın ya da <em>Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç"</em> yolunu kullanın. İmzasızlığın nedeni Apple Developer üyeliğinin (99 $/yıl) karşılanamamasıdır; uygulama GPL-3.0 açık kaynak olduğu için dileyen kaynaktan derleyebilir.
           </div>
         </div>
 
