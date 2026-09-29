@@ -1,6 +1,6 @@
 [package]
 name = "cookie-launcher"
-version = "2.0.0"
+version = "3.0.0"
 description = "Modern, aesthetic and high performance Minecraft launcher"
 authors = ["CookieLauncher Team"]
 edition = "2021"

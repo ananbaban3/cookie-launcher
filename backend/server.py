@@ -635,7 +635,7 @@ def clean_minecraft_version(v):
 class ModrinthFetcher:
     BASE_URL = "https://api.modrinth.com/v2"
     HEADERS = {
-        "User-Agent": "Freesm/CookieLauncher/2.0.0 (https://github.com/cookie-launcher; support@cookielauncher.app)"
+        "User-Agent": "Freesm/CookieLauncher/3.0.0 (https://github.com/cookie-launcher; support@cookielauncher.app)"
     }
     # Arama + surum cozumleme onbellegi. OrderedDict + ust sinir ile LRU
     # davranisi uygulanir; aksi hâlde her farkli arama kalici olarak birikir
@@ -2551,7 +2551,7 @@ def get_complete_version_manifest():
     global LAST_MANIFEST_ERROR
     try:
         url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
-        req = urllib.request.Request(url, headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Freesm/CookieLauncher/3.0.0"})
         # macOS'ta sistem kok sertifikalari bulunamazsa burasi patlar; certifi
         # tabanli SSL_CONTEXT ile dogru CA demeti kullanilir.
         with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as resp:
@@ -2618,7 +2618,7 @@ def run_net_selftest():
         t0 = time.time()
         entry = {"name": name, "url": url}
         try:
-            r = requests.get(url, timeout=8, headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
+            r = requests.get(url, timeout=8, headers={"User-Agent": "Freesm/CookieLauncher/3.0.0"})
             entry["ok"] = r.status_code == 200
             entry["http"] = r.status_code
         except Exception as e:
@@ -2630,7 +2630,7 @@ def run_net_selftest():
     # Mojang manifesti urllib ile cekiliyor: onu da ayrica test et
     urllib_entry = {"name": "urllib_piston", "url": targets[1][1]}
     try:
-        req = urllib.request.Request(targets[1][1], headers={"User-Agent": "Freesm/CookieLauncher/2.0.0"})
+        req = urllib.request.Request(targets[1][1], headers={"User-Agent": "Freesm/CookieLauncher/3.0.0"})
         with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as resp:
             urllib_entry["ok"] = getattr(resp, "status", 200) == 200
             urllib_entry["http"] = getattr(resp, "status", 200)
@@ -2854,7 +2854,7 @@ def run_game_background_task(params):
             "jvmArguments": jvm_args,
             "executablePath": java_exec,
             "launcherName": "CookieLauncher",
-            "launcherVersion": "2.0.0",
+            "launcherVersion": "3.0.0",
         }
 
         update_state(
@@ -3352,7 +3352,7 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({
                     "success": True,
                     "app": "CookieLauncher",
-                    "version": "2.0.0",
+                    "version": "3.0.0",
                     "api_version": API_VERSION,
                     "features": ["instances", "modpack", "instance_mods", "content_manage",
                                  "content_icons", "loader_versions", "net_test",

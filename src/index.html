@@ -7,69 +7,94 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- =================== BAŞLIK ÇUBUĞU (TITLEBAR) =================== -->
+  <!-- =================== BAŞLIK ÇUBUĞU (TITLEBAR) — ince, 40px =================== -->
   <header class="titlebar" data-tauri-drag-region="deep">
     <div class="titlebar-left" data-tauri-drag-region="deep">
-      <img src="cookie-logo.png" alt="Logo" class="launcher-logo" onerror="this.style.display='none'">
-      <span class="app-title">CookieLauncher</span>
-      <span class="badge-opt">⚡ OPTİMİZE MOTORU</span>
-    </div>
-
-    <!-- Hızlı Klasörler Menüsü -->
-    <div class="titlebar-center">
+      <!-- Hızlı Klasörler Menüsü -->
       <div class="quick-dropdown">
-        <button class="btn-titlebar-action" id="btnQuickFolders">
+        <button class="btn-titlebar-action" id="btnQuickFolders" aria-haspopup="true" aria-expanded="false">
           <span>📁 Klasörler ▾</span>
         </button>
-        <div class="dropdown-menu" id="quickFoldersMenu">
-          <button class="dropdown-item" data-folder="">📂 .minecraft Ana Klasörü</button>
-          <button class="dropdown-item" data-folder="mods">🧩 mods Klasörü</button>
-          <button class="dropdown-item" data-folder="instances">⚡ instances (Profiller)</button>
-          <button class="dropdown-item" data-folder="saves">💾 saves (Dünyalar)</button>
-          <button class="dropdown-item" data-folder="screenshots">📸 screenshots Klasörü</button>
-          <button class="dropdown-item" data-folder="crash-reports">⚠️ crash-reports Klasörü</button>
+        <div class="dropdown-menu" id="quickFoldersMenu" role="menu">
+          <button class="dropdown-item" role="menuitem" data-folder="">📂 .minecraft Ana Klasörü</button>
+          <button class="dropdown-item" role="menuitem" data-folder="mods">🧩 mods Klasörü</button>
+          <button class="dropdown-item" role="menuitem" data-folder="instances">⚡ instances (Profiller)</button>
+          <button class="dropdown-item" role="menuitem" data-folder="saves">💾 saves (Dünyalar)</button>
+          <button class="dropdown-item" role="menuitem" data-folder="screenshots">📸 screenshots Klasörü</button>
+          <button class="dropdown-item" role="menuitem" data-folder="crash-reports">⚠️ crash-reports Klasörü</button>
         </div>
       </div>
     </div>
 
+    <!-- Sürükleme alanı (marka artık sol rail'de) -->
+    <div class="titlebar-drag" data-tauri-drag-region="deep"></div>
+
     <!-- Pencere Kontrolleri -->
     <div class="titlebar-controls">
-      <button class="control-btn" id="btnWinMinimize" title="Simge Durumuna Küçült">−</button>
-      <button class="control-btn" id="btnWinMaximize" title="Ekranı Kapla">□</button>
-      <button class="control-btn btn-close" id="btnWinClose" title="Kapat">✕</button>
+      <button class="control-btn" id="btnWinMinimize" title="Simge Durumuna Küçült" aria-label="Simge durumuna küçült">−</button>
+      <button class="control-btn" id="btnWinMaximize" title="Ekranı Kapla" aria-label="Ekranı kapla">□</button>
+      <button class="control-btn btn-close" id="btnWinClose" title="Kapat" aria-label="Kapat">✕</button>
     </div>
   </header>
 
-  <!-- =================== ANA DÜZEN =================== -->
+  <!-- =================== ANA DÜZEN: KALICI SOL RAIL + İÇERİK =================== -->
   <div class="app-layout">
-    <!-- Üst Gezinme Sekmeleri (Navbar) -->
-    <nav class="top-nav">
-      <div class="nav-links">
-        <button class="nav-tab active" data-tab="tab-play">
-          <span class="nav-icon">🎮</span>
-          <span>OYNA</span>
+    <!-- Kalıcı Sol Dikey Rail (Sidebar) -->
+    <nav class="rail" id="mainRail" aria-label="Ana gezinme">
+      <!-- Marka -->
+      <div class="rail-brand">
+        <img src="cookie-logo.png" alt="" class="rail-logo" onerror="this.style.display='none'">
+        <div class="rail-brand-text">
+          <span class="rail-brand-name">Cookie Launcher</span>
+          <span class="rail-version">v3.0.0</span>
+        </div>
+      </div>
+
+      <!-- Ana Menü -->
+      <div class="rail-menu" role="tablist" aria-orientation="vertical" aria-label="Bölümler">
+        <button class="nav-tab active" data-tab="tab-play" role="tab" aria-selected="true" aria-current="page" title="Oyna">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="10" y1="12" y2="12"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="15" x2="15.01" y1="13" y2="13"/><line x1="18" x2="18.01" y1="11" y2="11"/><rect width="20" height="12" x="2" y="6" rx="6"/></svg>
+          </span>
+          <span class="nav-label">Oyna</span>
         </button>
-        <button class="nav-tab" data-tab="tab-instances">
-          <span class="nav-icon">🗂️</span>
-          <span>PROFİLLER</span>
+        <button class="nav-tab" data-tab="tab-instances" role="tab" aria-selected="false" title="Profiller">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+          </span>
+          <span class="nav-label">Profiller</span>
         </button>
-        <button class="nav-tab" data-tab="tab-modrinth">
-          <span class="nav-icon">🧩</span>
-          <span>MODLAR &amp; PAKETLER</span>
+        <button class="nav-tab" data-tab="tab-modrinth" role="tab" aria-selected="false" title="Modlar &amp; Paketler">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></svg>
+          </span>
+          <span class="nav-label">Modlar &amp; Paketler</span>
         </button>
-        <button class="nav-tab" data-tab="tab-gallery">
-          <span class="nav-icon">📸</span>
-          <span>GALERİ</span>
+        <button class="nav-tab" data-tab="tab-gallery" role="tab" aria-selected="false" title="Galeri">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+          </span>
+          <span class="nav-label">Galeri</span>
         </button>
-        <button class="nav-tab" data-tab="tab-console">
-          <span class="nav-icon">💻</span>
-          <span>KONSOL</span>
+        <button class="nav-tab" data-tab="tab-console" role="tab" aria-selected="false" title="Konsol">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+          </span>
+          <span class="nav-label">Konsol</span>
         </button>
       </div>
 
-      <div class="nav-right">
-        <div class="connection-status">
-          <span class="status-indicator"></span>
+      <!-- Alt: Aktif Profil Mini Kartı + Çekirdek Durumu -->
+      <div class="rail-bottom">
+        <div class="rail-profile" id="railProfileCard" title="Aktif profil">
+          <div class="rail-profile-icon" id="railProfileIcon">🗂️</div>
+          <div class="rail-profile-text">
+            <span class="rail-profile-name" id="railProfileName">Profil yok</span>
+            <span class="rail-profile-meta" id="railProfileMeta">MC • —</span>
+          </div>
+        </div>
+        <div class="connection-status" id="railCoreStatus" data-state="ready">
+          <span class="status-indicator" aria-hidden="true"></span>
           <span id="engineStatusText">Core Hazır</span>
         </div>
       </div>
@@ -78,26 +103,53 @@
     <!-- İçerik Alanı -->
     <main class="main-content">
 
-      <!-- =================== SEKME 1: OYNA (ANA SAYFA) =================== -->
+      <!-- =================== SEKME 1: OYNA (HERO DÜZENİ) =================== -->
       <section class="tab-pane active" id="tab-play">
-        <div class="play-grid">
-          
-          <!-- SAĞ SÜTUN: Başlatma & Yapılandırma Paneli -->
-          <div class="launch-card">
+        <div class="play-layout">
 
-            <!-- 0. Aktif Profil Seçici -->
-            <div class="form-group">
-              <div class="label-row">
-                <label for="activeInstanceSelect">Aktif Profil</label>
-                <span class="label-hint">Modlar bu profilin izole klasörüne kurulur</span>
+          <!-- SOL: HERO PROFİL PANELİ + DEV BAŞLAT BUTONU -->
+          <div class="play-main">
+            <div class="panel hero-panel" id="heroPanel">
+              <div class="hero-profile">
+                <div class="hero-avatar" id="heroProfileIcon" aria-hidden="true">🗂️</div>
+                <div class="hero-info">
+                  <span class="hero-eyebrow">Aktif Profil</span>
+                  <h2 class="hero-name" id="heroProfileName">Profil seçilmedi</h2>
+                  <div class="hero-chips" id="heroProfileChips"></div>
+                  <p class="hero-sub" id="heroProfileSub">Başlamak için yeni bir profil oluşturun.</p>
+                </div>
               </div>
-              <div class="input-with-icon">
-                <span class="input-icon">🗂️</span>
-                <select id="activeInstanceSelect" class="styled-select styled-select-lg"></select>
+
+              <div class="hero-actions">
+                <button type="button" class="btn btn-secondary" id="heroDetailsBtn" disabled>Detaylar</button>
+                <button type="button" class="btn btn-ghost" id="heroManageBtn">Profilleri Yönet</button>
+              </div>
+
+              <div class="hero-switch">
+                <label for="activeInstanceSelect">Profil Değiştir</label>
+                <div class="input-with-icon">
+                  <span class="input-icon">🗂️</span>
+                  <select id="activeInstanceSelect" class="styled-select styled-select-lg"></select>
+                </div>
               </div>
             </div>
-            
-            <!-- 1. Oyuncu Adı Girişi -->
+
+            <!-- DEV OYUNU BAŞLAT BUTONU (durumlar: idle / busy / running) -->
+            <button class="btn-mega-launch" id="btnLaunchGame" data-mode="idle">
+              <span class="btn-glow-pulse"></span>
+              <span class="btn-icon">▶</span>
+              <span class="btn-text" id="btnLaunchText">OYUNU BAŞLAT</span>
+            </button>
+          </div>
+
+          <!-- SAĞ: KOMPAKT AYARLAR PANELİ -->
+          <aside class="panel play-settings">
+            <div class="panel-head">
+              <h3 class="panel-title">Oyun Ayarları</h3>
+              <span class="panel-sub">Bu ayarlar tüm profillerde geçerlidir</span>
+            </div>
+
+            <!-- Oyuncu Adı -->
             <div class="form-group">
               <div class="label-row">
                 <label for="usernameInput">Oyuncu Adı (Nickname)</label>
@@ -109,46 +161,39 @@
               </div>
             </div>
 
-            <!-- 4. COOKIE LAUNCHER ÖZEL OPTİMİZE MOTORU (Anahtar) -->
+            <!-- Optimize Motoru -->
             <div class="optimize-banner-row">
               <div class="opt-banner-left">
                 <span class="opt-lightning">⚡</span>
                 <div class="opt-banner-text">
-                  <span class="opt-banner-title">COOKIE LAUNCHER ÖZEL OPTİMİZE</span>
-                  <span class="opt-banner-desc">Sodium + Lithium + FerriteCore + Indium modlarını otomatik kurar, RAM ve GC parametrelerini ayarlar.</span>
+                  <span class="opt-banner-title">ÖZEL OPTİMİZE MOTORU</span>
+                  <span class="opt-banner-desc">Sodium + Lithium + FerriteCore + Indium otomatik kurulur; RAM ve GC parametreleri ayarlanır.</span>
                 </div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="cookieOptimizeToggle" checked>
+                <input type="checkbox" id="cookieOptimizeToggle" checked aria-label="Optimize motorunu aç/kapat">
                 <span class="toggle-slider"></span>
               </label>
             </div>
 
-            <!-- 5. RAM Ayarı -->
+            <!-- RAM Ayarı + Görsel Bellek Çubuğu -->
             <div class="form-group ram-group">
               <div class="label-row">
                 <label for="ramSlider">Ayrılan Bellek (RAM)</label>
                 <span class="ram-display-badge" id="ramValueText">4 GB</span>
               </div>
               <input type="range" id="ramSlider" class="styled-range" min="2" max="16" step="1" value="4">
+              <div class="ram-meter" aria-hidden="true"><div class="ram-meter-fill" id="ramBarFill"></div></div>
               <div class="range-marks">
                 <span>2 GB</span>
                 <span>4 GB</span>
                 <span>8 GB</span>
                 <span>16 GB</span>
               </div>
+              <p class="ram-summary" id="ramSummary">Oyun için ayrılan bellek miktarı.</p>
             </div>
+          </aside>
 
-            <!-- 6. Dev OYUNU BAŞLAT Butonu -->
-            <div class="launch-action-box">
-              <button class="btn-mega-launch" id="btnLaunchGame">
-                <span class="btn-glow-pulse"></span>
-                <span class="btn-icon">▶</span>
-                <span class="btn-text" id="btnLaunchText">OYUNU BAŞLAT</span>
-              </button>
-            </div>
-
-          </div>
         </div>
       </section>
 
@@ -161,7 +206,12 @@
           </div>
           <button class="btn-primary-action" id="btnCreateInstance">➕ Yeni Profil Oluştur</button>
         </div>
-        <div class="instances-grid" id="instancesGridWrap"></div>
+        <!-- İskelet (skeleton) yükleme: veri gelince JS doldurur -->
+        <div class="instances-grid" id="instancesGridWrap">
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
+        </div>
       </section>
 
       <!-- =================== SEKME 3: MODLAR & PAKETLER =================== -->
@@ -226,12 +276,14 @@
             <span class="target-hint" id="modrinthTargetHint">İçerikler seçilen profilin klasörüne kurulur.</span>
           </div>
 
-          <!-- Kart Grid Listesi -->
+          <!-- Kart Grid Listesi (iskelet yükleme) -->
           <div class="modrinth-cards-grid" id="modrinthResultsWrap">
-            <div class="loading-state">
-              <div class="spinner"></div>
-              <span>İçerikler taranıyor...</span>
-            </div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
           </div>
         </div>
 
@@ -244,9 +296,13 @@
               <button class="installed-cat-tab" data-cat="shader">Shaderlar <span id="installedCountShader">0</span></button>
               <button class="installed-cat-tab" data-cat="resourcepack">Doku Paketleri <span id="installedCountResourcepack">0</span></button>
             </div>
-            <button class="btn-installed-collapse" id="btnToggleInstalledPanel" title="Paneli daralt / genişlet">▾</button>
+            <button class="btn-installed-collapse" id="btnToggleInstalledPanel" title="Paneli daralt / genişlet" aria-label="Paneli daralt veya genişlet" aria-expanded="true">▾</button>
           </div>
-          <div class="installed-list" id="installedListWrap"></div>
+          <div class="installed-list" id="installedListWrap">
+            <div class="skeleton skeleton-row"></div>
+            <div class="skeleton skeleton-row"></div>
+            <div class="skeleton skeleton-row"></div>
+          </div>
         </div>
       </section>
 
@@ -260,7 +316,10 @@
           <button class="btn-secondary" id="btnOpenScreenshotsFolder">📂 Klasörü Aç</button>
         </div>
         <div class="gallery-grid" id="screenshotsGridWrap">
-          <!-- JS dolduracak -->
+          <!-- JS dolduracak (iskelet yükleme) -->
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
+          <div class="skeleton skeleton-card"></div>
         </div>
       </section>
 
@@ -280,10 +339,11 @@
   </div>
 
   <!-- =================== TAM EKRAN: PROFİL DETAY (FAZ 1) =================== -->
-  <div class="pds-screen" id="profileDetailScreen" style="display: none;" aria-hidden="true">
+  <div class="pds-screen" id="profileDetailScreen" style="display: none;" aria-hidden="true"
+       role="dialog" aria-modal="true" aria-label="Profil Detayı">
     <!-- ÜST BAŞLIK -->
     <header class="pds-header">
-      <button class="pds-back" id="pdsBackBtn" title="Geri (ESC)">←</button>
+      <button class="pds-back" id="pdsBackBtn" title="Geri (ESC)" aria-label="Geri">←</button>
       <div class="pds-head-icon" id="pdsHeadIcon">🗂️</div>
       <div class="pds-head-info">
         <h2 class="pds-head-name" id="pdsHeadName">Profil</h2>
@@ -295,22 +355,22 @@
     <div class="pds-body">
       <!-- SOL DİKEY MENÜ: 12 sekme -->
       <aside class="pds-sidebar" role="tablist" aria-label="Profil detay sekmeleri">
-        <button type="button" class="pds-side-tab" data-pds-tab="logs"><span class="pds-side-icon">📜</span><span>Minecraft Günlüğü</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="version"><span class="pds-side-icon">🧱</span><span>Sürüm</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="modrinth"><span class="pds-side-icon">🔎</span><span>Modrinth</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="mods"><span class="pds-side-icon">🧩</span><span>Modlar</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="resourcepack"><span class="pds-side-icon">🎨</span><span>Kaynak Paketleri</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="shader"><span class="pds-side-icon">✨</span><span>Shader Paketleri</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="notes"><span class="pds-side-icon">📝</span><span>Notlar</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="worlds"><span class="pds-side-icon">🌍</span><span>Dünyalar</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="servers"><span class="pds-side-icon">🌐</span><span>Sunucular</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="screenshots"><span class="pds-side-icon">📸</span><span>Ekran Görüntüleri</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="settings"><span class="pds-side-icon">⚙️</span><span>Ayarlar</span></button>
-        <button type="button" class="pds-side-tab" data-pds-tab="others"><span class="pds-side-icon">🗄️</span><span>Diğer Kayıtlar</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="logs"><span class="pds-side-icon">📜</span><span>Minecraft Günlüğü</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="version"><span class="pds-side-icon">🧱</span><span>Sürüm</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="modrinth"><span class="pds-side-icon">🔎</span><span>Modrinth</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="mods"><span class="pds-side-icon">🧩</span><span>Modlar</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="resourcepack"><span class="pds-side-icon">🎨</span><span>Kaynak Paketleri</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="shader"><span class="pds-side-icon">✨</span><span>Shader Paketleri</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="notes"><span class="pds-side-icon">📝</span><span>Notlar</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="worlds"><span class="pds-side-icon">🌍</span><span>Dünyalar</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="servers"><span class="pds-side-icon">🌐</span><span>Sunucular</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="screenshots"><span class="pds-side-icon">📸</span><span>Ekran Görüntüleri</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="settings"><span class="pds-side-icon">⚙️</span><span>Ayarlar</span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="pdsContent" class="pds-side-tab" data-pds-tab="others"><span class="pds-side-icon">🗄️</span><span>Diğer Kayıtlar</span></button>
       </aside>
 
       <!-- SAĞ İÇERİK ALANI -->
-      <section class="pds-content" id="pdsContent"></section>
+      <section class="pds-content" id="pdsContent" role="tabpanel" tabindex="0"></section>
     </div>
 
     <!-- MOD DETAY ÇEKMECESİ -->
@@ -318,7 +378,7 @@
     <aside class="pds-drawer" id="pdsDrawer" aria-hidden="true">
       <div class="pds-drawer-head">
         <span class="pds-drawer-title" id="pdsDrawerTitle">Detay</span>
-        <button class="btn-close-modal" id="pdsDrawerClose" title="Kapat">✕</button>
+        <button class="btn-close-modal" id="pdsDrawerClose" title="Kapat" aria-label="Kapat">✕</button>
       </div>
       <div class="pds-drawer-body" id="pdsDrawerBody"></div>
     </aside>
@@ -334,7 +394,7 @@
             <p class="pds-store-sub" id="pdsStoreSub">Modrinth'ten shader paketleri indirin.</p>
           </div>
         </div>
-        <button class="btn-close-modal" id="pdsStoreClose" title="Kapat (ESC)">✕</button>
+        <button class="btn-close-modal" id="pdsStoreClose" title="Kapat (ESC)" aria-label="Kapat">✕</button>
       </div>
       <div class="pds-store-bar">
         <input type="text" class="styled-input" id="pdsStoreQuery" placeholder="Shader ara... (örn: complementary)" autocomplete="off" spellcheck="false">
@@ -351,20 +411,20 @@
 
     <!-- EKRAN GÖRÜNTÜSÜ BÜYÜK GÖRÜNÜM (FAZ 4) -->
     <div class="pds-lightbox" id="pdsLightbox" aria-hidden="true">
-      <button class="pds-lightbox-close" id="pdsLightboxClose" title="Kapat (ESC)">✕</button>
+      <button class="pds-lightbox-close" id="pdsLightboxClose" title="Kapat (ESC)" aria-label="Kapat">✕</button>
       <img class="pds-lightbox-img" id="pdsLightboxImg" alt="">
     </div>
   </div>
 
   <!-- =================== MODAL: YENİ PROFİL (SEKMELİ YENİ ARAYÜZ) =================== -->
   <div class="modal-backdrop" id="createInstanceModal" style="display: none;">
-    <div class="modal-window create-instance-modal np-modal">
+    <div class="modal-window create-instance-modal np-modal" role="dialog" aria-modal="true" aria-labelledby="npModalTitle">
       <div class="modal-top">
         <div class="modal-top-title">
           <span class="m-icon">🗂️</span>
-          <h3>Yeni Profil Oluştur</h3>
+          <h3 id="npModalTitle">Yeni Profil Oluştur</h3>
         </div>
-        <button class="btn-close-modal" id="btnCloseCreateInstanceModal">✕</button>
+        <button class="btn-close-modal" id="btnCloseCreateInstanceModal" aria-label="Kapat">✕</button>
       </div>
 
       <div class="np-layout">
@@ -540,7 +600,7 @@
 
   <!-- =================== MODAL: ONAY / UYARI =================== -->
   <div class="modal-backdrop" id="confirmModal" style="display: none;">
-    <div class="modal-window confirm-modal-window">
+    <div class="modal-window confirm-modal-window" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
       <div class="confirm-modal-inner">
         <div class="confirm-icon" id="confirmModalIcon">⚠️</div>
         <h3 class="confirm-title" id="confirmModalTitle">Emin misiniz?</h3>
@@ -555,7 +615,7 @@
 
   <!-- =================== MODAL: MOD SÜRÜM DEĞİŞTİR =================== -->
   <div class="modal-backdrop" id="versionSwitchModal" style="display: none;">
-    <div class="modal-window version-switch-window">
+    <div class="modal-window version-switch-window" role="dialog" aria-modal="true" aria-labelledby="vswTitle">
       <div class="modal-top">
         <div class="modal-top-title vsw-head">
           <span class="vsw-icon" id="vswIcon">🧩</span>
@@ -564,7 +624,7 @@
             <p class="vsw-sub" id="vswSub">Tüm sürümler yükleniyor...</p>
           </div>
         </div>
-        <button class="btn-close-modal" id="btnCloseVersionSwitch" title="Kapat (ESC)">✕</button>
+        <button class="btn-close-modal" id="btnCloseVersionSwitch" title="Kapat (ESC)" aria-label="Kapat">✕</button>
       </div>
 
       <div class="vsw-body">
@@ -584,13 +644,13 @@
 
   <!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
   <div class="modal-backdrop" id="versionSelectorModal" style="display: none;">
-    <div class="modal-window version-modal-window">
+    <div class="modal-window version-modal-window" role="dialog" aria-modal="true" aria-label="Minecraft Sürümü Seç">
       <div class="modal-top">
         <div class="modal-top-title">
           <span class="m-icon">📦</span>
           <h3>Minecraft Sürümü Seç</h3>
         </div>
-        <button class="btn-close-modal" id="btnCloseVersionSelectorModal">✕</button>
+        <button class="btn-close-modal" id="btnCloseVersionSelectorModal" aria-label="Kapat">✕</button>
       </div>
 
       <div class="version-selector-body">
@@ -648,14 +708,14 @@
 
     <!-- =================== MODAL: CANLI İLERLEME ÇUBUĞU (NON-BLOCKING LAUNCH) =================== -->
   <div class="modal-backdrop" id="launchProgressModal" style="display: none;">
-    <div class="modal-window progress-modal-window">
+    <div class="modal-window progress-modal-window" role="dialog" aria-modal="true" aria-labelledby="launchProgressTitle">
       <div class="progress-modal-inner">
         <div class="progress-spinner-glow">
           <div class="pulse-ring"></div>
           <span class="progress-cube-icon">⛏️</span>
         </div>
 
-        <h3 class="progress-title">Minecraft Hazırlanıyor...</h3>
+        <h3 class="progress-title" id="launchProgressTitle">Minecraft Hazırlanıyor...</h3>
         <p class="progress-status-msg" id="launchProgressStatusText">Bileşenler kontrol ediliyor...</p>
         <p class="progress-detail-msg" id="launchProgressDetailText">İndirme akışı başlatılıyor...</p>
 

@@ -49,6 +49,7 @@ const state = {
   installedContentMeta: { mod: {}, shader: {}, resourcepack: {} },
   installedCategory: "mod",
   installedPanelCollapsed: false,
+  installedLoading: false,
   contentLoadFailed: false,
   coreModsWarned: false,
 
@@ -242,10 +243,31 @@ function initUI() {
   if (optToggle) optToggle.checked = state.cookieOptimize;
 
   const ramSlider = document.getElementById("ramSlider");
+  if (ramSlider) ramSlider.value = state.ram;
+  updateRamUI();
+
+  // Hero + rail aktif profil özeti
+  renderPlayHero();
+}
+
+// RAM göstergesi: rozet + görsel bellek çubuğu + özet metni
+function updateRamUI() {
+  const ram = state.ram;
   const ramText = document.getElementById("ramValueText");
-  if (ramSlider && ramText) {
-    ramSlider.value = state.ram;
-    ramText.textContent = `${state.ram} GB`;
+  const fill = document.getElementById("ramBarFill");
+  const summary = document.getElementById("ramSummary");
+  if (ramText) ramText.textContent = `${ram} GB`;
+  if (fill) {
+    const pct = Math.round(((ram - 2) / (16 - 2)) * 100);
+    fill.style.width = `${Math.max(8, Math.min(100, pct))}%`;
+  }
+  if (summary) {
+    const advice = ram >= 8
+      ? "Modlu paketler için rahat bir değer."
+      : ram >= 4
+        ? "Vanilla ve hafif modlar için yeterli."
+        : "Yalnızca vanilla oyun için önerilir.";
+    summary.textContent = `${ram} GB ayrıldı • ${advice}`;
   }
 }
 
@@ -259,11 +281,16 @@ function setupEventListeners() {
   const btnQuick = document.getElementById("btnQuickFolders");
   const quickMenu = document.getElementById("quickFoldersMenu");
   if (btnQuick && quickMenu) {
+    const syncQuickAria = () => btnQuick.setAttribute("aria-expanded", quickMenu.classList.contains("show") ? "true" : "false");
     btnQuick.addEventListener("click", (e) => {
       e.stopPropagation();
       quickMenu.classList.toggle("show");
+      syncQuickAria();
     });
-    window.addEventListener("click", () => quickMenu.classList.remove("show"));
+    window.addEventListener("click", () => {
+      quickMenu.classList.remove("show");
+      syncQuickAria();
+    });
   }
 
   document.querySelectorAll(".dropdown-item[data-folder]").forEach(item => {
@@ -371,6 +398,7 @@ function setupEventListeners() {
       const panel = document.getElementById("installedPanel");
       if (panel) panel.classList.toggle("collapsed", state.installedPanelCollapsed);
       btnToggleInstalled.textContent = state.installedPanelCollapsed ? "▴" : "▾";
+      btnToggleInstalled.setAttribute("aria-expanded", state.installedPanelCollapsed ? "false" : "true");
     });
   }
 
@@ -436,14 +464,25 @@ function setupEventListeners() {
 
   // RAM Slider
   const ramSlider = document.getElementById("ramSlider");
-  const ramText = document.getElementById("ramValueText");
-  if (ramSlider && ramText) {
+  if (ramSlider) {
     ramSlider.addEventListener("input", (e) => {
       state.ram = parseInt(e.target.value);
       localStorage.setItem("cl_ram", state.ram);
-      ramText.textContent = `${state.ram} GB`;
+      updateRamUI();
     });
   }
+
+  // Hero eylemleri
+  const heroDetails = document.getElementById("heroDetailsBtn");
+  if (heroDetails) {
+    heroDetails.addEventListener("click", () => {
+      const inst = getActiveInstance();
+      if (inst) openProfileDetail(inst.id, "mods");
+      else openCreateInstanceModal();
+    });
+  }
+  const heroManage = document.getElementById("heroManageBtn");
+  if (heroManage) heroManage.addEventListener("click", () => switchTab("tab-instances"));
 
   // OYUNU BAŞLAT
   const btnLaunch = document.getElementById("btnLaunchGame");
@@ -541,10 +580,107 @@ function setupEventListeners() {
 
   // Sürüm Değiştir overlay'i
   initVersionSwitchModal();
+
+  // Erişilebilirlik: rail klavye gezinmesi + modal odak tuzağı/ESC
+  initRailA11y();
+  initDialogA11y();
+}
+
+// Rail'de ok tuşlarıyla gezinme (rol=tablist, roving tabindex)
+function initRailA11y() {
+  const menu = document.querySelector(".rail-menu");
+  if (!menu || menu.dataset.bound === "1") return;
+  menu.dataset.bound = "1";
+
+  const tabs = () => Array.from(menu.querySelectorAll(".nav-tab"));
+  tabs().forEach(t => { t.tabIndex = t.classList.contains("active") ? 0 : -1; });
+
+  menu.addEventListener("keydown", (e) => {
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const items = tabs();
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement);
+    let next = 0;
+    if (e.key === "ArrowDown") next = idx < 0 ? 0 : (idx + 1) % items.length;
+    else if (e.key === "ArrowUp") next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length;
+    else if (e.key === "End") next = items.length - 1;
+    items[next].focus();
+    items[next].click();
+  });
+}
+
+// Modallar: role=dialog, odak tuzağı (Tab döngüsü) ve ESC ile kapatma
+function initDialogA11y() {
+  if (initDialogA11y._bound) return;
+  initDialogA11y._bound = true;
+
+  const closers = {
+    createInstanceModal: () => closeCreateInstanceModal(),
+    confirmModal: () => { const b = document.getElementById("btnConfirmCancel"); if (b) b.click(); },
+    versionSwitchModal: () => closeVersionSwitchOverlay(),
+    versionSelectorModal: () => closeVersionSelectorModal(),
+    launchProgressModal: () => closeProgressModal()
+  };
+
+  const visibleModal = () => {
+    const modals = Array.from(document.querySelectorAll(".modal-backdrop"))
+      .filter(m => m && m.style.display === "flex");
+    return modals.length ? modals[modals.length - 1] : null;
+  };
+
+  const focusables = (root) => Array.from(root.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )).filter(el => !el.disabled && el.offsetParent !== null);
+
+  document.addEventListener("keydown", (e) => {
+    const modal = visibleModal();
+
+    if (e.key === "Escape") {
+      if (modal && closers[modal.id]) {
+        e.preventDefault();
+        closers[modal.id]();
+      }
+      return;
+    }
+
+    if (e.key !== "Tab") return;
+
+    // Modal açıkken odak tuzağı; modal yoksa profil detay ekranında tut
+    const screen = document.getElementById("profileDetailScreen");
+    const profileOpen = screen && screen.style.display !== "none" && screen.getAttribute("aria-hidden") !== "true";
+    const root = modal || (profileOpen ? screen : null);
+    if (!root) return;
+
+    const items = focusables(root);
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+
+    if (!root.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 function switchTab(tabId) {
-  document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".nav-tab").forEach(t => {
+    const active = t.getAttribute("data-tab") === tabId;
+    t.classList.toggle("active", active);
+    t.setAttribute("aria-selected", active ? "true" : "false");
+    if (active) t.setAttribute("aria-current", "page");
+    else t.removeAttribute("aria-current");
+    t.tabIndex = active ? 0 : -1;
+  });
   document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
 
   const targetTab = document.querySelector(`.nav-tab[data-tab="${tabId}"]`);
@@ -659,12 +795,14 @@ function renderInstances() {
   wrap.innerHTML = "";
 
   if (state.instances.length === 0) {
+    // Birleşik boş durum bileşeni (ikon + başlık + açıklama + eylem)
     const empty = document.createElement("div");
-    empty.className = "loading-state";
+    empty.className = "empty-state";
     empty.innerHTML = `
-      <span style="font-size: 38px;">🗂️</span>
-      <span>Henüz profil oluşturulmamış.<br>Modların nereye kurulacağını belirlemek için ilk profilinizi oluşturun.</span>
-      <button class="btn-primary-action" id="btnEmptyCreateInstance" style="margin-top: 6px;">➕ Yeni Profil Oluştur</button>
+      <div class="empty-state-icon" aria-hidden="true">🗂️</div>
+      <h3 class="empty-state-title">Henüz profil oluşturulmamış</h3>
+      <p class="empty-state-desc">Modların nereye kurulacağını belirlemek için ilk profilinizi oluşturun.</p>
+      <button class="btn btn-primary" id="btnEmptyCreateInstance">➕ Yeni Profil Oluştur</button>
     `;
     wrap.appendChild(empty);
     const btn = document.getElementById("btnEmptyCreateInstance");
@@ -824,6 +962,95 @@ function applyActiveInstanceToUI() {
     }
   } else if (hint) {
     hint.textContent = "İstediğiniz sürümü doğrudan yazabilir veya listeden seçebilirsiniz";
+  }
+
+  renderPlayHero();
+}
+
+// Hero paneli + rail mini kartını aktif profile göre güncelle
+function renderPlayHero() {
+  const inst = getActiveInstance();
+  const nameEl = document.getElementById("heroProfileName");
+  const iconEl = document.getElementById("heroProfileIcon");
+  const chipsEl = document.getElementById("heroProfileChips");
+  const subEl = document.getElementById("heroProfileSub");
+  const detailsBtn = document.getElementById("heroDetailsBtn");
+
+  const railCard = document.getElementById("railProfileCard");
+  const railIcon = document.getElementById("railProfileIcon");
+  const railName = document.getElementById("railProfileName");
+  const railMeta = document.getElementById("railProfileMeta");
+
+  if (!inst) {
+    if (nameEl) nameEl.textContent = "Profil seçilmedi";
+    if (chipsEl) chipsEl.innerHTML = "";
+    if (subEl) subEl.textContent = "Başlamak için yeni bir profil oluşturun.";
+    if (iconEl) { iconEl.textContent = "🗂️"; }
+    if (detailsBtn) detailsBtn.disabled = true;
+    if (railCard) railCard.classList.add("is-empty");
+    if (railIcon) railIcon.textContent = "🗂️";
+    if (railName) railName.textContent = "Profil yok";
+    if (railMeta) railMeta.textContent = "MC • —";
+    return;
+  }
+
+  const loaderLabel = pdsLoaderLabel(inst.loader);
+  const loaderText = loaderLabel + (inst.loader_version ? ` ${inst.loader_version}` : "");
+
+  if (nameEl) nameEl.textContent = inst.name || "Profil";
+  if (subEl) subEl.textContent = `"${inst.name || "Profil"}" profili ile oyuna hazırsın.`;
+  if (detailsBtn) detailsBtn.disabled = false;
+
+  if (chipsEl) {
+    chipsEl.innerHTML = `
+      <span class="chip">MC ${escapeHtml(inst.version || "?")}</span>
+      <span class="chip">${escapeHtml(loaderText)}</span>
+      <span class="chip">🧩 ${inst.mod_count || 0} mod</span>
+    `;
+  }
+
+  // Büyük hero avatarı (ikon yoksa baş harf)
+  if (iconEl) {
+    iconEl.innerHTML = "";
+    if (inst.icon) {
+      const img = document.createElement("img");
+      img.src = inst.icon;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => {
+        img.remove();
+        iconEl.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+      });
+      iconEl.appendChild(img);
+    } else {
+      iconEl.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+    }
+  }
+
+  // Rail mini kartı
+  if (railCard) railCard.classList.remove("is-empty");
+  if (railName) railName.textContent = inst.name || "Profil";
+  if (railMeta) {
+    railMeta.innerHTML = `
+      <span class="mini-chip">MC ${escapeHtml(inst.version || "?")}</span>
+      <span class="mini-chip">${escapeHtml(loaderLabel)}</span>
+    `;
+  }
+  if (railIcon) {
+    railIcon.innerHTML = "";
+    if (inst.icon) {
+      const img = document.createElement("img");
+      img.src = inst.icon;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", () => {
+        img.remove();
+        railIcon.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+      });
+      railIcon.appendChild(img);
+    } else {
+      railIcon.textContent = (inst.name || "?").trim().charAt(0).toUpperCase() || "?";
+    }
   }
 }
 
@@ -1707,7 +1934,10 @@ function setLaunchButton(mode) {
     btnText.textContent = labels[mode] || labels.idle;
   }
   // noProfile modunda buton tiklanabilir kalir: tiklayinca profil olusturma acilir
-  if (btnLaunch) btnLaunch.disabled = (mode !== "idle" && mode !== "noProfile");
+  if (btnLaunch) {
+    btnLaunch.disabled = (mode !== "idle" && mode !== "noProfile");
+    btnLaunch.dataset.mode = mode;
+  }
 }
 
 function openProgressModal() {
@@ -1856,6 +2086,8 @@ async function pollStatus() {
     if (state.coreFailCount >= 3) {
       const engineStatus = document.getElementById("engineStatusText");
       if (engineStatus) engineStatus.textContent = "Core Bekleniyor...";
+      const statusWrap = document.getElementById("railCoreStatus");
+      if (statusWrap) statusWrap.dataset.state = "offline";
     }
     // Her ~7 saniyede bir portu yeniden keşfetmeyi dene
     if (state.coreFailCount % 10 === 0) {
@@ -1880,6 +2112,8 @@ async function pollStatus() {
 
 function updateEngineStatus(installing, running) {
   const engineStatus = document.getElementById("engineStatusText");
+  const statusWrap = document.getElementById("railCoreStatus");
+  if (statusWrap) statusWrap.dataset.state = running ? "running" : (installing ? "busy" : "ready");
   if (!engineStatus) return;
   if (running) {
     engineStatus.textContent = "Oyun Çalışıyor";
@@ -1974,13 +2208,16 @@ async function refreshInstalledContent() {
   state.installedContentMeta = { mod: {}, shader: {}, resourcepack: {} };
 
   const target = getModrinthTarget();
+  state.installedLoading = !!target;
   renderInstalledPanel();
   if (!target) {
     state.contentLoadFailed = false;
+    state.installedLoading = false;
     return;
   }
 
   const data = await apiGet(`/api/instances/content?instance_id=${encodeURIComponent(target.id)}`, 8000);
+  state.installedLoading = false;
   if (!data || data.success !== true) {
     state.contentLoadFailed = true;
     renderInstalledPanel();
@@ -2089,27 +2326,44 @@ function renderInstalledPanel() {
 
   const cat = state.installedCategory || "mod";
   const files = state.installedContent[cat] || [];
+  const icons = { mod: "🧩", shader: "✨", resourcepack: "🎨" };
   wrap.innerHTML = "";
 
   if (!target) {
-    wrap.innerHTML = `<div class="installed-empty">Yönetmek için üstten bir kurulum hedefi (profil) seçin.</div>`;
+    wrap.innerHTML = `<div class="empty-state empty-state-compact">
+      <div class="empty-state-icon" aria-hidden="true">📥</div>
+      <h3 class="empty-state-title">Kurulum hedefi seçilmedi</h3>
+      <p class="empty-state-desc">Yönetmek için üstten bir profil seçin.</p>
+    </div>`;
     return;
   }
   if (state.contentLoadFailed) {
-    wrap.innerHTML = `<div class="installed-empty">⚠️ İçerik listesi alınamadı. Core eski sürümde olabilir; launcher'ı kapatıp yeniden başlatın.</div>`;
+    wrap.innerHTML = `<div class="empty-state empty-state-compact">
+      <div class="empty-state-icon" aria-hidden="true">⚠️</div>
+      <h3 class="empty-state-title">İçerik listesi alınamadı</h3>
+      <p class="empty-state-desc">Core eski sürümde olabilir; launcher'ı kapatıp yeniden başlatın.</p>
+    </div>`;
+    return;
+  }
+  if (state.installedLoading && files.length === 0) {
+    wrap.innerHTML = `<div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>`;
     return;
   }
   if (files.length === 0) {
     const labels = { mod: "mod", shader: "shader", resourcepack: "doku paketi" };
-    wrap.innerHTML = `<div class="installed-empty">Bu profilde henüz ${labels[cat]} yok.</div>`;
+    wrap.innerHTML = `<div class="empty-state empty-state-compact">
+      <div class="empty-state-icon" aria-hidden="true">${icons[cat] || "📦"}</div>
+      <h3 class="empty-state-title">Bu profilde henüz ${labels[cat]} yok</h3>
+      <p class="empty-state-desc">Modrinth sekmesinden içerik kurarak başlayın.</p>
+    </div>`;
     return;
   }
 
-  const icons = { mod: "🧩", shader: "✨", resourcepack: "🎨" };
-
   files.forEach(f => {
     const row = document.createElement("div");
-    row.className = "installed-row";
+    row.className = "installed-row ui-row";
 
     const sizeText = f.size >= 1048576
       ? `${(f.size / 1048576).toFixed(1)} MB`
@@ -2148,8 +2402,9 @@ function renderInstalledPanel() {
     `;
 
     const delBtn = document.createElement("button");
-    delBtn.className = "btn-installed-delete";
+    delBtn.className = "btn-installed-delete btn btn-ghost btn-danger-ghost";
     delBtn.title = "Bu içeriği profilden kaldır";
+    delBtn.setAttribute("aria-label", "Bu içeriği profilden kaldır");
     delBtn.textContent = "🗑️";
     delBtn.addEventListener("click", () => deleteInstalledContent(cat, f.name));
 
@@ -2334,7 +2589,12 @@ async function fetchModrinth(reset = true) {
     state.modrinthOffset = 0;
     state.modrinthHits = [];
     state.modrinthHasMore = true;
-    wrap.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
+    wrap.innerHTML = `<div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>`;
     await refreshInstalledContent();
   } else {
     updateModrinthFooter();
@@ -2721,8 +2981,27 @@ function initProfileDetailScreen() {
   }
 
   document.querySelectorAll(".pds-side-tab").forEach(btn => {
+    btn.tabIndex = btn.classList.contains("active") ? 0 : -1;
     btn.addEventListener("click", () => pdsSwitchTab(btn.getAttribute("data-pds-tab")));
   });
+
+  // Profil detayı sol menüsü: rail diliyle uyumlu ok tuşu gezinmesi
+  const pdsSidebar = document.querySelector(".pds-sidebar");
+  if (pdsSidebar) {
+    pdsSidebar.addEventListener("keydown", (e) => {
+      const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      e.preventDefault();
+      const items = Array.from(pdsSidebar.querySelectorAll(".pds-side-tab"));
+      const idx = items.indexOf(document.activeElement);
+      let next = 0;
+      if (e.key === "ArrowDown") next = idx < 0 ? 0 : (idx + 1) % items.length;
+      else if (e.key === "ArrowUp") next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length;
+      else if (e.key === "End") next = items.length - 1;
+      items[next].focus();
+      items[next].click();
+    });
+  }
 
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
@@ -2839,7 +3118,10 @@ function pdsSwitchTab(tabId) {
   }
   pdsState.activeTab = tabId;
   document.querySelectorAll(".pds-side-tab").forEach(btn => {
-    btn.classList.toggle("active", btn.getAttribute("data-pds-tab") === tabId);
+    const active = btn.getAttribute("data-pds-tab") === tabId;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+    btn.tabIndex = active ? 0 : -1;
   });
 
   const content = document.getElementById("pdsContent");
@@ -2882,7 +3164,9 @@ function pdsRenderContentTab(pane, cat) {
     </div>
     ${cat === "mod" ? '<div class="pds-deps-warn" id="pdsDepsWarn" style="display:none;"></div>' : ""}
     <div class="pds-list" id="pdsListWrap">
-      <div class="pds-loading"><div class="spinner"></div><span>İçerik listesi yükleniyor...</span></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
     </div>
   `;
   const refresh = document.getElementById("pdsRefreshBtn");
@@ -3493,7 +3777,9 @@ function pdsRenderMrResults(errorMsg) {
   if (!wrap) return;
 
   if (pdsState.modrinth.loading) {
-    wrap.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth taranıyor...</span></div>`;
+    wrap.innerHTML = `<div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>`;
     return;
   }
   if (errorMsg) {
@@ -3678,7 +3964,9 @@ function vswResolveInstalledVersion() {
   return "";
 }
 
-async function openVersionSwitchOverlay(opts = {}) {
+async function openVersionSwitchOverlay(opts = {}, catArg) {
+  // Geriye dönük kısayol: openVersionSwitchOverlay("sodium", "mod")
+  if (typeof opts === "string") opts = { slug: opts, cat: catArg || "mod" };
   const slug = String(opts.slug || "").trim();
   if (!slug) {
     showToast("Bu içeriğin Modrinth kaydı bulunamadı.", "info");
@@ -3772,7 +4060,10 @@ function vswRenderList() {
 
   if (vswState.loading) {
     if (empty) empty.style.display = "none";
-    list.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Tüm sürümler yükleniyor...</span></div>`;
+    list.innerHTML = `<div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>
+      <div class="skeleton skeleton-row"></div>`;
     return;
   }
   if (vswState.error) {
@@ -4254,7 +4545,10 @@ function pdsRenderShaderStore() {
   const st = pdsState.store;
 
   if (st.loading) {
-    wrap.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Modrinth shader mağazası taranıyor...</span></div>`;
+    wrap.innerHTML = `<div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>`;
     return;
   }
   if (st.error) {
