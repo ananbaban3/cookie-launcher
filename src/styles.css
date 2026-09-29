@@ -5745,6 +5745,47 @@ body {
   width: 100%;
 }
 
+/* Uyumsuz sürüm filtresi (varsayılan: yalnızca uyumlu sürümler) */
+.vsw-filter-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vsw-show-incompat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.vsw-show-incompat:hover {
+  color: var(--text-strong);
+}
+
+.vsw-show-incompat input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #ff9b2b;
+  cursor: pointer;
+}
+
+.vsw-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* İnce amber kaydırma çubuğu */
 .vsw-list {
   flex: 1;
@@ -5933,6 +5974,11 @@ body {
   color: var(--text-muted);
   font-size: 12.5px;
   text-align: center;
+}
+
+.vsw-empty .empty-state {
+  width: 100%;
+  max-width: 480px;
 }
 
 .vsw-truncated-note {

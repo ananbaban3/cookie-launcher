@@ -631,12 +631,19 @@
         <div class="vsw-search-row">
           <input type="text" id="vswSearchInput" class="styled-input" placeholder="Sürüm ara... (örn: 0.5.8)" autocomplete="off" spellcheck="false">
         </div>
+        <div class="vsw-filter-row" id="vswFilterRow">
+          <label class="vsw-show-incompat" for="vswShowIncompat">
+            <input type="checkbox" id="vswShowIncompat">
+            <span id="vswShowIncompatLabel">Uyumsuzları da göster (0)</span>
+          </label>
+          <span class="vsw-count" id="vswCount"></span>
+        </div>
         <div class="vsw-list" id="vswList"></div>
         <div class="vsw-empty" id="vswEmpty" style="display: none;">Yüklenecek sürüm bulunamadı.</div>
       </div>
 
       <div class="modal-bottom">
-        <span class="modal-tip-text">💡 Uyumsuz sürümler listede görünür ancak kurulamaz.</span>
+        <span class="modal-tip-text">💡 Yalnızca profilinizle uyumlu sürümler listelenir; uyumsuzları üstteki anahtardan gösterin.</span>
         <button class="btn-secondary" id="btnCancelVersionSwitch">Kapat</button>
       </div>
     </div>

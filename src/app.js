@@ -3920,6 +3920,20 @@ const vswState = {
   truncated: false
 };
 
+const VSW_SHOW_INCOMPAT_KEY = "cl_vsw_show_incompatible";
+
+function vswShowIncompatiblePref() {
+  try { return localStorage.getItem(VSW_SHOW_INCOMPAT_KEY) === "true"; } catch (e) { return false; }
+}
+
+function vswSetShowIncompatible(value, opts = {}) {
+  const on = !!value;
+  try { localStorage.setItem(VSW_SHOW_INCOMPAT_KEY, on ? "true" : "false"); } catch (e) { /* yoksay */ }
+  const toggle = document.getElementById("vswShowIncompat");
+  if (toggle) toggle.checked = on;
+  if (vswState.open) vswRenderList({ preserveScroll: opts.preserveScroll !== false });
+}
+
 function vswNormalizeVersion(value) {
   let s = String(value === null || value === undefined ? "" : value).trim().toLowerCase();
   s = s.replace(/^v[.\s]*/, "");
@@ -4071,6 +4085,8 @@ async function openVersionSwitchOverlay(opts = {}, catArg) {
       : "Profil seçilmedi";
   }
   if (searchEl) searchEl.value = "";
+  const toggleEl = document.getElementById("vswShowIncompat");
+  if (toggleEl) toggleEl.checked = vswShowIncompatiblePref();
 
   modal.style.display = "flex";
   vswRenderList();
@@ -4108,9 +4124,28 @@ function closeVersionSwitchOverlay() {
   vswState.open = false;
 }
 
-function vswRenderList() {
+function vswRenderIncompatEmptyState(emptyEl) {
+  if (!emptyEl) return;
+  const inst = vswState.instance || {};
+  const mc = inst.version || "?";
+  const loader = pdsLoaderLabel(inst.loader);
+  emptyEl.style.display = "flex";
+  emptyEl.innerHTML = `
+    <div class="empty-state empty-state-compact">
+      <div class="empty-state-icon" aria-hidden="true">🧩</div>
+      <h3 class="empty-state-title">Bu profil için uygun sürüm yok</h3>
+      <p class="empty-state-desc">${pdsEsc(mc)} • ${pdsEsc(loader)} yapılandırmasıyla uyumlu sürüm bulunamadı.</p>
+      <button class="btn btn-primary" type="button" id="vswEmptyShowIncompat">Uyumsuzları göster</button>
+    </div>
+  `;
+  const btn = document.getElementById("vswEmptyShowIncompat");
+  if (btn) btn.addEventListener("click", () => vswSetShowIncompatible(true));
+}
+
+function vswRenderList(opts = {}) {
   const list = document.getElementById("vswList");
   const empty = document.getElementById("vswEmpty");
+  const toggle = document.getElementById("vswShowIncompat");
   if (!list) return;
 
   if (vswState.loading) {
@@ -4127,18 +4162,52 @@ function vswRenderList() {
     return;
   }
 
+  // Varsayılan: yalnızca profile uyumlu sürümler. Tercih localStorage'da saklanır.
+  const showIncompat = vswShowIncompatiblePref();
+  if (toggle) toggle.checked = showIncompat;
+  if (empty) empty.innerHTML = "";
+  const prevScroll = opts.preserveScroll ? list.scrollTop : null;
+
   const q = vswNormalizeVersion(vswState.query);
   const versions = vswState.versions.filter(v =>
     !q || vswNormalizeVersion(v.version_number).includes(q) || vswNormalizeVersion(v.version_id).includes(q)
   );
+  const compatOf = (v) => typeof v.compatible === "boolean"
+    ? v.compatible
+    : vswIsCompatible(v, vswState.cat, vswState.instance);
+
+  const compatible = versions.filter(v => compatOf(v));
+  const incompatible = versions.filter(v => !compatOf(v));
+  const visible = showIncompat ? versions : compatible;
+  const totalCompatible = vswState.versions.filter(v => compatOf(v)).length;
+
+  const filterRow = document.getElementById("vswFilterRow");
+  if (filterRow) filterRow.style.display = vswState.versions.length > 0 ? "flex" : "none";
+  const toggleLabel = document.getElementById("vswShowIncompatLabel");
+  if (toggleLabel) toggleLabel.textContent = `Uyumsuzları da göster (${incompatible.length})`;
+  const countEl = document.getElementById("vswCount");
+  if (countEl) {
+    let txt = `${compatible.length} uyumlu sürüm`;
+    if (incompatible.length > 0) {
+      txt += showIncompat
+        ? ` • ${incompatible.length} uyumsuz gösteriliyor`
+        : ` • ${incompatible.length} uyumsuz gizli`;
+    }
+    countEl.textContent = txt;
+  }
 
   list.innerHTML = "";
-  if (versions.length === 0) {
+  if (visible.length === 0) {
     if (empty) {
-      empty.style.display = "flex";
-      empty.textContent = vswState.versions.length === 0
-        ? "Bu içerik için sürüm bulunamadı."
-        : "Aramanızla eşleşen sürüm yok.";
+      if (vswState.versions.length === 0) {
+        empty.style.display = "flex";
+        empty.textContent = "Bu içerik için sürüm bulunamadı.";
+      } else if (!showIncompat && totalCompatible === 0) {
+        vswRenderIncompatEmptyState(empty);
+      } else {
+        empty.style.display = "flex";
+        empty.textContent = "Aramanızla eşleşen sürüm yok.";
+      }
     }
     return;
   }
@@ -4146,10 +4215,8 @@ function vswRenderList() {
 
   const installedItems = vswInstalledContentItems();
 
-  versions.forEach(v => {
-    const compatible = typeof v.compatible === "boolean"
-      ? v.compatible
-      : vswIsCompatible(v, vswState.cat, vswState.instance);
+  visible.forEach(v => {
+    const compatible = compatOf(v);
     // Öncelik: uyumsuz > Kurulu. Uyumsuz satır asla "Kurulu" göstermez.
     const isInstalled = compatible && vswVersionIsInstalled(v, installedItems);
 
@@ -4223,6 +4290,8 @@ function vswRenderList() {
     note.textContent = `ℹ️ Çok fazla sürüm var; en yeni 200 sürüm gösteriliyor.`;
     list.appendChild(note);
   }
+
+  if (prevScroll !== null) list.scrollTop = prevScroll;
 }
 
 async function vswInstallVersion(version, buttonEl) {
@@ -4275,10 +4344,16 @@ function initVersionSwitchModal() {
   const btnClose = document.getElementById("btnCloseVersionSwitch");
   const btnCancel = document.getElementById("btnCancelVersionSwitch");
   const search = document.getElementById("vswSearchInput");
+  const toggle = document.getElementById("vswShowIncompat");
 
   if (btnClose) btnClose.addEventListener("click", close);
   if (btnCancel) btnCancel.addEventListener("click", close);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+
+  if (toggle) {
+    toggle.checked = vswShowIncompatiblePref();
+    toggle.addEventListener("change", () => vswSetShowIncompatible(toggle.checked));
+  }
 
   if (search) {
     search.addEventListener("input", () => {
