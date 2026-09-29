@@ -553,7 +553,36 @@
     </div>
   </div>
 
-<!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
+  <!-- =================== MODAL: MOD SÜRÜM DEĞİŞTİR =================== -->
+  <div class="modal-backdrop" id="versionSwitchModal" style="display: none;">
+    <div class="modal-window version-switch-window">
+      <div class="modal-top">
+        <div class="modal-top-title vsw-head">
+          <span class="vsw-icon" id="vswIcon">🧩</span>
+          <div class="vsw-head-text">
+            <h3 id="vswTitle">Sürüm Değiştir</h3>
+            <p class="vsw-sub" id="vswSub">Tüm sürümler yükleniyor...</p>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="btnCloseVersionSwitch" title="Kapat (ESC)">✕</button>
+      </div>
+
+      <div class="vsw-body">
+        <div class="vsw-search-row">
+          <input type="text" id="vswSearchInput" class="styled-input" placeholder="Sürüm ara... (örn: 0.5.8)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="vsw-list" id="vswList"></div>
+        <div class="vsw-empty" id="vswEmpty" style="display: none;">Yüklenecek sürüm bulunamadı.</div>
+      </div>
+
+      <div class="modal-bottom">
+        <span class="modal-tip-text">💡 Uyumsuz sürümler listede görünür ancak kurulamaz.</span>
+        <button class="btn-secondary" id="btnCancelVersionSwitch">Kapat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== MODAL: SÜRÜM SEÇİCİ VE SAĞ FİLTRELEME PANELİ =================== -->
   <div class="modal-backdrop" id="versionSelectorModal" style="display: none;">
     <div class="modal-window version-modal-window">
       <div class="modal-top">

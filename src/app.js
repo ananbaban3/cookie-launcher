@@ -196,7 +196,7 @@ async function detectApiBase() {
       if (res.ok) {
         const data = await res.json();
         // Eski/stale backend süreçlerini atla: yalnızca güncel API sürümü kabul
-        if (data && Number(data.api_version) >= 13) {
+        if (data && Number(data.api_version) >= 14) {
           API_BASE = `http://127.0.0.1:${port}`;
           return true;
         }
@@ -538,6 +538,9 @@ function setupEventListeners() {
       if (cOut) cOut.textContent = "Konsol temizlendi.\n";
     });
   }
+
+  // Sürüm Değiştir overlay'i
+  initVersionSwitchModal();
 }
 
 function switchTab(tabId) {
@@ -2003,6 +2006,34 @@ async function refreshInstalledContent() {
   renderInstalledPanel();
 }
 
+function ensureVersionButton(card, installed) {
+  if (!card) return;
+  const type = card.getAttribute("data-project-type") || "mod";
+  const actions = card.querySelector(".mod-card-actions") || card.querySelector(".mod-bottom-row");
+  let btn = card.querySelector(".btn-mod-ver");
+  const wanted = installed && type !== "modpack";
+
+  if (wanted && !btn && actions) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-mod-ver";
+    btn.title = "Bu içeriğin başka bir sürümünü kur";
+    btn.textContent = "⇄ Sürüm Değiştir";
+    btn.addEventListener("click", () => {
+      openVersionSwitchOverlay({
+        slug: card.getAttribute("data-slug") || "",
+        title: card.getAttribute("data-title") || "",
+        cat: card.getAttribute("data-project-type") || "mod",
+        iconUrl: card.getAttribute("data-icon") || "",
+        instance: getModrinthTarget()
+      });
+    });
+    actions.appendChild(btn);
+  } else if (!wanted && btn) {
+    btn.remove();
+  }
+}
+
 function applyInstalledStates() {
   document.querySelectorAll(".mod-card[data-slug]").forEach(card => {
     const slug = card.getAttribute("data-slug");
@@ -2017,6 +2048,7 @@ function applyInstalledStates() {
         btn.disabled = true;
         btn.textContent = "✓ Yüklü";
       }
+      ensureVersionButton(card, true);
       if (state.hideInstalled) {
         card.style.display = "none";
         return;
@@ -2028,6 +2060,7 @@ function applyInstalledStates() {
         btn.disabled = false;
         btn.textContent = "⚡ Hızlı Kur";
       }
+      ensureVersionButton(card, false);
     }
     card.style.display = "";
   });
@@ -2209,6 +2242,8 @@ function buildModCard(hit, index) {
   card.className = "mod-card" + (installed ? " installed" : "");
   card.dataset.slug = hit.slug || "";
   card.dataset.projectType = isModpack ? "modpack" : category;
+  card.dataset.title = hit.title || hit.slug || "";
+  card.dataset.icon = hit.icon_url || "";
   card.style.animationDelay = `${Math.min(index * 0.03, 0.5)}s`;
 
   const iconBox = document.createElement("div");
@@ -2240,7 +2275,9 @@ function buildModCard(hit, index) {
       <span style="font-size: 11px; color: var(--text-muted);">↓ ${(hit.downloads || 0).toLocaleString()}</span>
       ${installed ? '<span class="mod-installed-chip">✓ Bu profilde yüklü</span>' : ""}
       ${!installed && target ? `<span class="mod-target-chip" title="Kurulum hedefi: ${escapeHtml(target.name)}">📥 ${escapeHtml(target.name)}</span>` : ""}
-      <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : category}">${buttonLabel}</button>
+      <span class="mod-card-actions">
+        <button class="btn-mod-dl" data-kind="${isModpack ? "modpack" : category}">${buttonLabel}</button>
+      </span>
     </div>
   `;
 
@@ -2259,6 +2296,7 @@ function buildModCard(hit, index) {
 
   card.appendChild(iconBox);
   card.appendChild(content);
+  ensureVersionButton(card, installed);
   return card;
 }
 
@@ -3029,15 +3067,35 @@ function pdsRenderContentList(cat) {
     detailBtn.textContent = "Detay";
     detailBtn.addEventListener("click", () => pdsOpenDrawer(f, cat));
 
+    actions.appendChild(toggle);
+    actions.appendChild(detailBtn);
+
+    if (f.slug) {
+      const verBtn = document.createElement("button");
+      verBtn.type = "button";
+      verBtn.className = "pds-btn pds-btn-ver";
+      verBtn.title = "Bu içeriğin başka bir sürümünü kur";
+      verBtn.textContent = "⇄ Sürüm";
+      verBtn.addEventListener("click", () => openVersionSwitchOverlay({
+        slug: f.slug,
+        title: displayName,
+        cat: cat,
+        iconUrl: f.has_icon
+          ? `${API_BASE}/api/instances/content/icon?instance_id=${encodeURIComponent(pdsState.instanceId)}` +
+            `&category=${encodeURIComponent(cat)}&name=${encodeURIComponent(f.name)}&t=${Math.round(f.mtime || 0)}`
+          : "",
+        installedVersion: f.version || "",
+        instance: pdsSyncInstance()
+      }));
+      actions.appendChild(verBtn);
+    }
+
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "pds-btn pds-btn-danger";
     delBtn.title = "Sil";
     delBtn.textContent = "🗑";
     delBtn.addEventListener("click", () => pdsDeleteContent(cat, f));
-
-    actions.appendChild(toggle);
-    actions.appendChild(detailBtn);
     actions.appendChild(delBtn);
 
     row.appendChild(iconBox);
@@ -3554,6 +3612,337 @@ async function pdsHandleInstallResult(data, buttonEl, original, cat, hit) {
   } else {
     showToast(`⚠️ ${(data && data.error) || "Kurulum tamamlanamadı."}`, "error");
   }
+}
+
+// ==============================================================================
+// SÜRÜM DEĞİŞTİR (VERSION SWITCH) — arama kartı ve profil detayı ortak overlay
+// ==============================================================================
+const vswState = {
+  open: false,
+  slug: "",
+  cat: "mod",
+  title: "",
+  iconUrl: "",
+  instance: null,
+  installedVersion: "",
+  versions: [],
+  loading: false,
+  error: "",
+  query: "",
+  truncated: false
+};
+
+function vswNormalizeVersion(value) {
+  let s = String(value === null || value === undefined ? "" : value).trim().toLowerCase();
+  s = s.replace(/^v[.\s]*/, "");
+  return s.replace(/\s+/g, "");
+}
+
+function vswIsCompatible(v, cat, inst) {
+  if (!inst) return false;
+  const gvs = (v.game_versions || []).map(x => String(x));
+  if (!gvs.includes(String(inst.version || ""))) return false;
+  if (cat === "mod") {
+    const loaders = (v.loaders || []).map(x => String(x).toLowerCase());
+    if (!loaders.includes(String(inst.loader || "").toLowerCase())) return false;
+  }
+  return true;
+}
+
+function vswReason(v, cat, inst) {
+  if (!inst) return "Profil bulunamadı.";
+  const gvs = (v.game_versions || []).map(x => String(x));
+  if (!gvs.includes(String(inst.version || ""))) {
+    return `Profilin Minecraft sürümü (${inst.version || "?"}) bu sürümde yok.`;
+  }
+  if (cat === "mod") {
+    const loaders = (v.loaders || []).map(x => String(x).toLowerCase());
+    if (!loaders.includes(String(inst.loader || "").toLowerCase())) {
+      return `Profil yükleyicisi (${inst.loader || "?"}) bu sürümde yok.`;
+    }
+  }
+  return "";
+}
+
+function vswResolveInstalledVersion() {
+  if (vswState.installedVersion) return vswState.installedVersion;
+  const slug = String(vswState.slug || "").toLowerCase();
+  const target = vswState.instance;
+  const meta = (state.installedContentMeta[vswState.cat] || {})[slug];
+  if (meta && meta.version) return meta.version;
+  // Profil detayı ekranı aynı profili gösteriyorsa oradaki sürüm bilgisini kullan.
+  if (target && pdsState.instanceId && pdsState.instanceId === target.id && pdsState.content[vswState.cat]) {
+    const row = (pdsState.content[vswState.cat] || []).find(f => String(f.slug || "").toLowerCase() === slug);
+    if (row && row.version) return row.version;
+  }
+  return "";
+}
+
+async function openVersionSwitchOverlay(opts = {}) {
+  const slug = String(opts.slug || "").trim();
+  if (!slug) {
+    showToast("Bu içeriğin Modrinth kaydı bulunamadı.", "info");
+    return;
+  }
+
+  const modal = document.getElementById("versionSwitchModal");
+  if (!modal) return;
+
+  vswState.open = true;
+  vswState.slug = slug;
+  vswState.cat = opts.cat || "mod";
+  vswState.title = opts.title || slug;
+  vswState.iconUrl = opts.iconUrl || "";
+  vswState.instance = opts.instance || getModrinthTarget();
+  vswState.installedVersion = opts.installedVersion || "";
+  vswState.versions = [];
+  vswState.error = "";
+  vswState.query = "";
+  vswState.truncated = false;
+
+  const titleEl = document.getElementById("vswTitle");
+  const subEl = document.getElementById("vswSub");
+  const iconEl = document.getElementById("vswIcon");
+  const searchEl = document.getElementById("vswSearchInput");
+
+  if (titleEl) titleEl.textContent = `⇄ ${vswState.title} — Sürüm Değiştir`;
+  if (iconEl) {
+    iconEl.innerHTML = "";
+    iconEl.textContent = PDS_CAT_INFO[vswState.cat] ? PDS_CAT_INFO[vswState.cat].icon : "🧩";
+    if (vswState.iconUrl) {
+      const img = document.createElement("img");
+      img.src = vswState.iconUrl;
+      img.alt = "";
+      img.addEventListener("error", () => {
+        img.remove();
+        iconEl.textContent = PDS_CAT_INFO[vswState.cat] ? PDS_CAT_INFO[vswState.cat].icon : "🧩";
+      });
+      iconEl.textContent = "";
+      iconEl.appendChild(img);
+    }
+  }
+  if (subEl) {
+    const inst = vswState.instance;
+    subEl.textContent = inst
+      ? `Hedef: ${inst.name || inst.id} • MC ${inst.version || "?"} • ${pdsLoaderLabel(inst.loader)}`
+      : "Profil seçilmedi";
+  }
+  if (searchEl) searchEl.value = "";
+
+  modal.style.display = "flex";
+  vswRenderList();
+
+  if (!vswState.instance) {
+    vswState.loading = false;
+    vswState.error = "Sürüm değiştirmek için önce bir profil seçin.";
+    vswRenderList();
+    return;
+  }
+
+  vswState.loading = true;
+  vswRenderList();
+
+  const params = new URLSearchParams({ slug: slug, instance: vswState.instance.id || "" });
+  const data = await apiGet(`/api/modrinth/project?${params.toString()}`, 15000);
+  if (!vswState.open) return;
+
+  vswState.loading = false;
+  if (data && data.success && Array.isArray(data.versions)) {
+    vswState.versions = data.versions;
+    vswState.truncated = data.versions_truncated === true;
+    if (data.icon_url) vswState.iconUrl = data.icon_url;
+    vswState.error = "";
+  } else {
+    vswState.versions = [];
+    vswState.error = (data && data.error) || "Modrinth sürüm listesi alınamadı.";
+  }
+  vswRenderList();
+}
+
+function closeVersionSwitchOverlay() {
+  const modal = document.getElementById("versionSwitchModal");
+  if (modal) modal.style.display = "none";
+  vswState.open = false;
+}
+
+function vswRenderList() {
+  const list = document.getElementById("vswList");
+  const empty = document.getElementById("vswEmpty");
+  if (!list) return;
+
+  if (vswState.loading) {
+    if (empty) empty.style.display = "none";
+    list.innerHTML = `<div class="pds-loading"><div class="spinner"></div><span>Tüm sürümler yükleniyor...</span></div>`;
+    return;
+  }
+  if (vswState.error) {
+    if (empty) empty.style.display = "none";
+    list.innerHTML = `<div class="pds-empty">⚠️ ${pdsEsc(vswState.error)}</div>`;
+    return;
+  }
+
+  const q = vswNormalizeVersion(vswState.query);
+  const versions = vswState.versions.filter(v =>
+    !q || vswNormalizeVersion(v.version_number).includes(q) || vswNormalizeVersion(v.version_id).includes(q)
+  );
+
+  list.innerHTML = "";
+  if (versions.length === 0) {
+    if (empty) {
+      empty.style.display = "flex";
+      empty.textContent = vswState.versions.length === 0
+        ? "Bu içerik için sürüm bulunamadı."
+        : "Aramanızla eşleşen sürüm yok.";
+    }
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  const installedNorm = vswNormalizeVersion(vswResolveInstalledVersion());
+
+  versions.forEach(v => {
+    const compatible = typeof v.compatible === "boolean"
+      ? v.compatible
+      : vswIsCompatible(v, vswState.cat, vswState.instance);
+    const isInstalled = installedNorm && vswNormalizeVersion(v.version_number) === installedNorm;
+
+    const row = document.createElement("div");
+    row.className = "vsw-row" +
+      (isInstalled ? " is-installed" : "") +
+      (!compatible ? " is-incompat" : "");
+
+    const type = String(v.version_type || "release").toLowerCase();
+    const typeLabel = type === "beta" ? "Beta" : (type === "alpha" ? "Alpha" : "Release");
+    const gvs = (v.game_versions || []).slice(0, 4).join(", ");
+    const loaders = (v.loaders || []).slice(0, 4).join(", ");
+    const metaParts = [];
+    if (gvs) metaParts.push(`MC: ${gvs}`);
+    if (loaders) metaParts.push(loaders);
+    if (v.date) metaParts.push(String(v.date).slice(0, 10));
+    if (v.primary_filename) metaParts.push(v.primary_filename);
+
+    const main = document.createElement("div");
+    main.className = "vsw-row-main";
+    main.innerHTML = `
+      <div class="vsw-row-top">
+        <span class="vsw-ver">${pdsEsc(v.version_number || v.version_id || "?")}</span>
+        <span class="vsw-type vsw-type-${pdsEsc(type)}">${pdsEsc(typeLabel)}</span>
+        ${isInstalled ? '<span class="vsw-installed-tag">✓ Kurulu</span>' : ""}
+      </div>
+      <div class="vsw-row-meta" title="${pdsEsc(metaParts.join(" • "))}">${pdsEsc(metaParts.join(" • "))}</div>
+    `;
+
+    const action = document.createElement("div");
+    action.className = "vsw-row-action";
+
+    if (isInstalled) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "vsw-btn is-installed";
+      btn.disabled = true;
+      btn.textContent = "✓ Kurulu";
+      action.appendChild(btn);
+    } else if (compatible) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "vsw-btn vsw-btn-install";
+      btn.textContent = "Bu sürümü kur";
+      btn.addEventListener("click", () => vswInstallVersion(v, btn));
+      action.appendChild(btn);
+    } else {
+      const tag = document.createElement("span");
+      tag.className = "vsw-incompat-tag";
+      tag.textContent = "uyumsuz";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "vsw-btn";
+      btn.disabled = true;
+      btn.textContent = "Kur";
+      const reason = vswReason(v, vswState.cat, vswState.instance);
+      btn.title = reason || "Bu sürüm profilinizle uyumlu değil.";
+      tag.title = btn.title;
+      action.appendChild(tag);
+      action.appendChild(btn);
+    }
+
+    row.appendChild(main);
+    row.appendChild(action);
+    list.appendChild(row);
+  });
+
+  if (vswState.truncated) {
+    const note = document.createElement("div");
+    note.className = "vsw-truncated-note";
+    note.textContent = `ℹ️ Çok fazla sürüm var; en yeni 200 sürüm gösteriliyor.`;
+    list.appendChild(note);
+  }
+}
+
+async function vswInstallVersion(version, buttonEl) {
+  const inst = vswState.instance;
+  if (!inst || !version) return;
+
+  const original = buttonEl ? buttonEl.textContent : "";
+  if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = "Kuruluyor..."; }
+
+  const data = await apiPost("/api/modrinth/install", {
+    slug: vswState.slug,
+    version: inst.version,
+    loader: inst.loader,
+    project_type: vswState.cat,
+    instance_id: inst.id,
+    version_id: version.version_id || "",
+    version_number: version.version_number || "",
+    install_dependencies: getInstallDepsPref()
+  }, 180000);
+
+  if (data && data.success) {
+    const installed = data.installed || {};
+    const oldName = String(data.replaced || "").replace(/\.disabled$/i, "");
+    const newName = String(installed.filename || data.filename || version.primary_filename || "").replace(/\.disabled$/i, "");
+    const transition = oldName && newName && oldName !== newName
+      ? `${oldName} → ${newName}`
+      : (newName || oldName);
+    showToast(`✓ ${vswState.title || vswState.slug} ${transition}`, "success");
+
+    closeVersionSwitchOverlay();
+    await refreshInstalledContent();
+    applyInstalledStates();
+    if (pdsState.instanceId) {
+      await pdsLoadContent(vswState.cat, true);
+      if (vswState.cat === "mod") pdsLoadMissingDeps();
+    }
+    loadInstances();
+  } else {
+    if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = original || "Bu sürümü kur"; }
+    showToast(`⚠️ ${(data && data.error) || "Sürüm değiştirilemedi."}`, "error");
+  }
+}
+
+function initVersionSwitchModal() {
+  const modal = document.getElementById("versionSwitchModal");
+  if (!modal || modal.dataset.bound === "1") return;
+  modal.dataset.bound = "1";
+
+  const close = () => closeVersionSwitchOverlay();
+  const btnClose = document.getElementById("btnCloseVersionSwitch");
+  const btnCancel = document.getElementById("btnCancelVersionSwitch");
+  const search = document.getElementById("vswSearchInput");
+
+  if (btnClose) btnClose.addEventListener("click", close);
+  if (btnCancel) btnCancel.addEventListener("click", close);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+
+  if (search) {
+    search.addEventListener("input", () => {
+      vswState.query = search.value || "";
+      vswRenderList();
+    });
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && vswState.open) close();
+  });
 }
 
 // ---------- Sürüm sekmesi ----------

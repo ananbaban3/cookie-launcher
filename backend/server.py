@@ -124,7 +124,7 @@ CACHE_SAVE_MIN_INTERVAL = 30.0  # saniye: ardisik disk yazimlarini birlestir
 
 # NOT: Yeni bir API endpoint'i eklendiginde bu surumu ARTIR ve
 # src-tauri/src/main.rs ile src/app.js icindeki kontrolu de guncelle!
-API_VERSION = 13
+API_VERSION = 14
 
 
 # ==================== PROFIL (INSTANCE) YARDIMCILARI ====================
@@ -1005,13 +1005,20 @@ def fetch_modrinth_project_detail(slug):
         if not isinstance(raw_versions, list):
             raw_versions = []
 
+        # Surum listesi FILTRELENMEZ: release + beta + alpha hepsi API sirasinda
+        # (en yeni -> en eski) gelir. Asiri buyuk projelerde 200 kayitla sinirla.
         versions = []
-        for v in raw_versions[:40]:
+        versions_truncated = len(raw_versions) > 200
+        for v in raw_versions[:200]:
+            primary = _version_primary_file(v)
             versions.append({
                 "version_number": v.get("version_number") or v.get("name") or "",
+                "version_id": str(v.get("id") or ""),
+                "version_type": str(v.get("version_type") or "release"),
                 "game_versions": [str(g) for g in (v.get("game_versions") or [])],
                 "loaders": [str(l).lower() for l in (v.get("loaders") or [])],
                 "date": v.get("date_published") or "",
+                "primary_filename": str((primary or {}).get("filename") or ""),
             })
 
         # Bagimlilik adlarini en yeni surumden topla, gerekiyorsa toplu sorgula
@@ -1072,8 +1079,10 @@ def fetch_modrinth_project_detail(slug):
             "downloads": project.get("downloads", 0),
             "follows": project.get("followers", 0),
             "source_url": project.get("source_url") or "",
+            "project_type": str(project.get("project_type") or "mod"),
             "gallery": gallery,
             "versions": versions,
+            "versions_truncated": versions_truncated,
             "dependencies": dependencies,
         }
     except Exception as e:
@@ -1086,6 +1095,40 @@ def fetch_modrinth_project_detail(slug):
         while len(_PROJECT_DETAIL_CACHE) > _PROJECT_DETAIL_MAX:
             _PROJECT_DETAIL_CACHE.popitem(last=False)
     return summary
+
+
+def annotate_project_detail_for_instance(summary, inst_id):
+    """Proje detayindaki surumlere profil uyumluluk bilgisi ekler.
+
+    Onbellekteki ozet kopyalanir (mutasyon yok); her surum icin `compatible`
+    alani hesaplanir. Modlarda profile yukleyicisi de aranir; shader ve doku
+    paketlerinde yalnizca MC surumu kontrol edilir.
+    """
+    inst = load_instance_config(inst_id)
+    if not isinstance(summary, dict) or not summary.get("success") or not inst:
+        return summary
+
+    inst_version = clean_minecraft_version(inst.get("version") or "")
+    loader = str(inst.get("loader") or "").lower()
+    loader_required = str(summary.get("project_type") or "mod") == "mod"
+
+    versions = []
+    for v in summary.get("versions") or []:
+        item = dict(v)
+        gvs = [str(g) for g in (item.get("game_versions") or [])]
+        loaders = [str(l).lower() for l in (item.get("loaders") or [])]
+        item["compatible"] = (inst_version in gvs) and (not loader_required or loader in loaders)
+        versions.append(item)
+
+    annotated = dict(summary)
+    annotated["versions"] = versions
+    annotated["instance"] = {
+        "id": inst.get("id") or inst_id,
+        "name": inst.get("name") or "",
+        "version": inst_version,
+        "loader": loader,
+    }
+    return annotated
 
 
 def pick_modpack_version(versions, preferred_game_version=""):
@@ -1368,6 +1411,98 @@ def _version_has_game_loader(version, game_version, loader):
     if loader and str(loader).lower() not in loaders:
         return False
     return True
+
+
+def swap_installed_version(inst_id, category, slug, version, target_dir):
+    """Kurulu bir icerigin surumunu degistirir: indir, eskisini sil, kaydet.
+
+    Eski dosya `.disabled` idiyse yeni dosya da `.disabled` olarak yazilir.
+    Donen: (True, {replaced, installed, project_id}) | (False, "hata mesaji").
+    """
+    cat = normalize_category(category)
+    primary = _version_primary_file(version)
+    new_filename = str((primary or {}).get("filename") or "")
+    if not primary or not primary.get("url") or not new_filename:
+        return False, "Bu sürüm için indirilebilir dosya yok."
+
+    safe_new = os.path.basename(new_filename)
+    if not safe_new or safe_new != new_filename:
+        return False, "Geçersiz dosya adı."
+
+    folder = target_dir
+    if not folder:
+        inst_dir = get_instance_dir(inst_id)
+        if not inst_dir:
+            return False, "Hedef klasör bulunamadı."
+        folder = os.path.join(inst_dir, CATEGORY_DIRS[cat])
+    os.makedirs(folder, exist_ok=True)
+
+    index = load_modrinth_index(inst_id)
+    entry = index.get(slug) if isinstance(index.get(slug), dict) else {}
+    manifest = load_content_manifest(inst_id).get(cat) or {}
+    man_entry = manifest.get(slug) if isinstance(manifest.get(slug), dict) else {}
+    old_filename = str(entry.get("filename") or man_entry.get("filename") or "")
+    safe_old = os.path.basename(old_filename) if old_filename else ""
+    if safe_old != old_filename:
+        safe_old = ""
+
+    # Eski dosyanin devre disi olup olmadigini diskten tespit et.
+    old_disabled = bool(safe_old) and os.path.exists(os.path.join(folder, safe_old + ".disabled")) \
+        and not os.path.exists(os.path.join(folder, safe_old))
+    new_disk_name = safe_new + ".disabled" if old_disabled else safe_new
+    new_dest = os.path.join(folder, new_disk_name)
+
+    # Eski dosya(lar)i sil; yeni dosyayla ayni olana dokunma.
+    replaced = None
+    if safe_old:
+        for cand in (safe_old, safe_old + ".disabled"):
+            if cand == new_disk_name:
+                continue
+            cand_path = os.path.join(folder, cand)
+            if os.path.isfile(cand_path):
+                if replaced is None:
+                    replaced = cand
+                try:
+                    os.remove(cand_path)
+                except Exception as e:
+                    add_log(f"⚠️ Eski sürüm dosyası silinemedi ({cand}): {e}")
+
+    add_log(f"⇄ Sürüm değiştiriliyor: {slug} → {new_disk_name}")
+    ModrinthFetcher.download_file(primary["url"], new_dest)
+    add_log(f"✓ Yeni sürüm kuruldu: {new_disk_name}")
+
+    # Hash onbellegindeki eski/yeni kayitlari temizle (yeniden hesaplanacak).
+    hashes = load_modrinth_hashes(inst_id)
+    if isinstance(hashes, dict) and hashes:
+        dirty = False
+        for key in list(hashes.keys()):
+            key_str = str(key)
+            base = key_str[:-len(".disabled")] if key_str.lower().endswith(".disabled") else key_str
+            if base in (safe_old, safe_new) and base:
+                hashes.pop(key, None)
+                dirty = True
+        if dirty:
+            save_modrinth_hashes(inst_id, hashes)
+
+    project_id = str(version.get("project_id") or entry.get("project_id") or "")
+    version_id = str(version.get("id") or "")
+    version_number = str(version.get("version_number") or "")
+    register_installed_content(
+        inst_id, cat, slug, safe_new, version_number,
+        project_id=project_id, version_id=version_id,
+    )
+    register_modrinth_index(inst_id, slug, safe_new, project_id, version_id)
+
+    return True, {
+        "replaced": replaced,
+        "installed": {
+            "filename": safe_new,
+            "version_number": version_number,
+            "version_id": version_id,
+            "disabled": old_disabled,
+        },
+        "project_id": project_id,
+    }
 
 
 def resolve_dependency_version(dep, game_version, loader):
@@ -3328,7 +3463,15 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 if not slug:
                     self.send_json({"success": False, "error": "slug gerekli"})
                     return
-                self.send_json(fetch_modrinth_project_detail(slug))
+                detail = fetch_modrinth_project_detail(slug)
+                inst_id = (
+                    query.get("instance", [""])[0]
+                    or query.get("instance_id", [""])[0]
+                    or ""
+                ).strip()
+                if inst_id:
+                    detail = annotate_project_detail_for_instance(detail, inst_id)
+                self.send_json(detail)
                 return
 
             # 4c. Modrinth Surum Uyum Kontrolu (shader/doku icin yumusak)
@@ -3645,68 +3788,120 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
 
                 try:
                     info = None
-
-                    if project_type == "mod":
-                        curated_key = (clean_v, loader)
-                        if curated_key in CURATED_OPTIMIZATION_MAP:
-                            for item in CURATED_OPTIMIZATION_MAP[curated_key]:
-                                if item["slug"] == slug:
-                                    info = item
-                                    break
-                        if not info:
-                            info = ModrinthFetcher.get_latest_mod_jar(slug, clean_v, loader=loader)
-                    else:
-                        # shader / doku paketi: tam eslesme yoksa en yeni surume dus
-                        info = ModrinthFetcher.get_project_file(
-                            slug, clean_v, project_type=project_type, loader=loader, allow_fallback=True
-                        )
-
-                    if not info or not info.get("url"):
-                        type_label = {
-                            "mod": "modu",
-                            "shader": "shader paketi",
-                            "resourcepack": "doku paketi",
-                        }[project_type]
-                        self.send_json({
-                            "success": False,
-                            "error": f"'{slug}' {type_label} Minecraft {clean_v} ({loader}) ile uyumlu bir sürüme sahip değil.",
-                        })
-                        return
-
-                    exact_match = bool(info.get("exact_match", True))
-
-                    # Tam uyumlu degilse once kullanicidan onay iste
-                    if not exact_match and not force:
-                        matched = (info.get("game_versions") or [""])[0]
-                        self.send_json({
-                            "success": False,
-                            "needs_confirm": True,
-                            "exact_match": False,
-                            "matched_game_version": matched,
-                            "filename": info.get("filename"),
-                            "message": (
-                                f"Bu paket mevcut oyun sürümünüzle (MC {clean_v}) tam eşleşmiyor "
-                                f"(en yakın: {matched or 'bilinmiyor'}). Çoğu zaman sorunsuz çalışır."
-                            ),
-                        })
-                        return
-
-                    fname = info["filename"]
-                    dest = os.path.join(target_dir, fname)
-                    if not os.path.exists(dest):
-                        add_log(f"📥 Modrinth'ten indiriliyor: {fname} → {target_label}")
-                        ModrinthFetcher.download_file(info["url"], dest)
-                        add_log(f"✓ Başarıyla kuruldu: {fname}")
-
-                    # CDN URL'inden proje/surum kimliklerini cikar (bagimlilik cozumu icin)
+                    specific_version = None
+                    replaced_name = None
+                    installed_disabled = False
+                    already_registered = False
                     main_pid, main_vid = "", ""
-                    url_match = re.search(r"/data/([^/]+)/versions/([^/]+)/", str(info.get("url") or ""))
-                    if url_match:
-                        main_pid, main_vid = url_match.group(1), url_match.group(2)
+
+                    raw_version_id = str(body.get("version_id") or "").strip()
+                    raw_version_number = str(body.get("version_number") or "").strip()
+
+                    if raw_version_id or raw_version_number:
+                        # --- Surum Degistir: belirli bir surumu kur ---
+                        if raw_version_id:
+                            specific_version = fetch_modrinth_version(raw_version_id)
+                        if specific_version is None and raw_version_number:
+                            for cand in fetch_modrinth_versions(slug):
+                                if str(cand.get("version_number") or "").strip() == raw_version_number:
+                                    specific_version = cand
+                                    break
+
+                        if specific_version is None:
+                            self.send_json({"success": False, "error": "Belirtilen sürüm bulunamadı."})
+                            return
+
+                        # Uyumluluk: MC profile uymali; modlarda yukleyici de uymali.
+                        required_loader = loader if project_type == "mod" else ""
+                        if not _version_has_game_loader(specific_version, clean_v, required_loader):
+                            self.send_json({
+                                "success": False,
+                                "error": f"Bu sürüm profilin {clean_v} {loader} yapılandırmasıyla uyumlu değil.",
+                            })
+                            return
+
+                        ok, swap_result = swap_installed_version(
+                            instance_id, project_type, slug, specific_version, target_dir
+                        )
+                        if not ok:
+                            self.send_json({"success": False, "error": swap_result})
+                            return
+
+                        fname = swap_result["installed"]["filename"]
+                        replaced_name = swap_result["replaced"]
+                        installed_disabled = bool(swap_result["installed"]["disabled"])
+                        version_number = str(swap_result["installed"]["version_number"] or "")
+                        main_pid = str(swap_result.get("project_id") or "")
+                        main_vid = str(swap_result["installed"]["version_id"] or "")
+                        exact_match = True
+                        already_registered = True
+                        gvs = specific_version.get("game_versions") or []
+                        matched_game_version = clean_minecraft_version(gvs[0]) if gvs else ""
+                    else:
+                        # --- Mevcut akis: en yeni uygun surumu kur ---
+                        if project_type == "mod":
+                            curated_key = (clean_v, loader)
+                            if curated_key in CURATED_OPTIMIZATION_MAP:
+                                for item in CURATED_OPTIMIZATION_MAP[curated_key]:
+                                    if item["slug"] == slug:
+                                        info = item
+                                        break
+                            if not info:
+                                info = ModrinthFetcher.get_latest_mod_jar(slug, clean_v, loader=loader)
+                        else:
+                            # shader / doku paketi: tam eslesme yoksa en yeni surume dus
+                            info = ModrinthFetcher.get_project_file(
+                                slug, clean_v, project_type=project_type, loader=loader, allow_fallback=True
+                            )
+
+                        if not info or not info.get("url"):
+                            type_label = {
+                                "mod": "modu",
+                                "shader": "shader paketi",
+                                "resourcepack": "doku paketi",
+                            }[project_type]
+                            self.send_json({
+                                "success": False,
+                                "error": f"'{slug}' {type_label} Minecraft {clean_v} ({loader}) ile uyumlu bir sürüme sahip değil.",
+                            })
+                            return
+
+                        exact_match = bool(info.get("exact_match", True))
+
+                        # Tam uyumlu degilse once kullanicidan onay iste
+                        if not exact_match and not force:
+                            matched = (info.get("game_versions") or [""])[0]
+                            self.send_json({
+                                "success": False,
+                                "needs_confirm": True,
+                                "exact_match": False,
+                                "matched_game_version": matched,
+                                "filename": info.get("filename"),
+                                "message": (
+                                    f"Bu paket mevcut oyun sürümünüzle (MC {clean_v}) tam eşleşmiyor "
+                                    f"(en yakın: {matched or 'bilinmiyor'}). Çoğu zaman sorunsuz çalışır."
+                                ),
+                            })
+                            return
+
+                        fname = info["filename"]
+                        dest = os.path.join(target_dir, fname)
+                        if not os.path.exists(dest):
+                            add_log(f"📥 Modrinth'ten indiriliyor: {fname} → {target_label}")
+                            ModrinthFetcher.download_file(info["url"], dest)
+                            add_log(f"✓ Başarıyla kuruldu: {fname}")
+
+                        # CDN URL'inden proje/surum kimliklerini cikar (bagimlilik cozumu icin)
+                        url_match = re.search(r"/data/([^/]+)/versions/([^/]+)/", str(info.get("url") or ""))
+                        if url_match:
+                            main_pid, main_vid = url_match.group(1), url_match.group(2)
+
+                        gvs = info.get("game_versions") or [""]
+                        matched_game_version = gvs[0] if gvs else ""
 
                     deps_result = None
 
-                    if instance_id:
+                    if instance_id and not already_registered:
                         register_installed_content(
                             instance_id, project_type, slug, fname,
                             info.get("version_number") or "",
@@ -3715,33 +3910,33 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         if main_pid or main_vid:
                             register_modrinth_index(instance_id, slug, fname, main_pid, main_vid)
 
-                        if install_dependencies and project_type == "mod":
-                            add_log(
-                                f"🔗 {slug} için zorunlu bağımlılıklar çözülüyor "
-                                f"(MC {clean_v} • {loader})..."
+                    if instance_id and install_dependencies and project_type == "mod":
+                        add_log(
+                            f"🔗 {slug} için zorunlu bağımlılıklar çözülüyor "
+                            f"(MC {clean_v} • {loader})..."
+                        )
+                        try:
+                            deps_result = install_required_dependencies(
+                                instance_id, target_dir, clean_v, loader,
+                                root_project_id=main_pid,
+                                root_version_id=main_vid,
+                                root_slug=slug,
                             )
-                            try:
-                                deps_result = install_required_dependencies(
-                                    instance_id, target_dir, clean_v, loader,
-                                    root_project_id=main_pid,
-                                    root_version_id=main_vid,
-                                    root_slug=slug,
-                                )
-                            except Exception as dep_err:
-                                set_net_error("modrinth_dependencies", dep_err)
-                                log_error(
-                                    f"Bağımlılık çözümleme hatası ({slug}): "
-                                    f"{type(dep_err).__name__}: {dep_err}"
-                                )
-                                deps_result = {
-                                    "installed_dependencies": [],
-                                    "failed_dependencies": [{
-                                        "slug": slug,
-                                        "reason": f"bağımlılık çözümleyici hatası: {dep_err}",
-                                    }],
-                                    "optional_dependencies": [],
-                                    "skipped_existing": [],
-                                }
+                        except Exception as dep_err:
+                            set_net_error("modrinth_dependencies", dep_err)
+                            log_error(
+                                f"Bağımlılık çözümleme hatası ({slug}): "
+                                f"{type(dep_err).__name__}: {dep_err}"
+                            )
+                            deps_result = {
+                                "installed_dependencies": [],
+                                "failed_dependencies": [{
+                                    "slug": slug,
+                                    "reason": f"bağımlılık çözümleyici hatası: {dep_err}",
+                                }],
+                                "optional_dependencies": [],
+                                "skipped_existing": [],
+                            }
 
                     response = {
                         "success": True,
@@ -3749,9 +3944,17 @@ class CookieLauncherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                         "target": target_label,
                         "category": project_type,
                         "exact_match": exact_match,
-                        "matched_game_version": (info.get("game_versions") or [""])[0] if info.get("game_versions") else "",
+                        "matched_game_version": matched_game_version,
                         "message": f"{fname} → {target_label} kuruldu.",
                     }
+                    if already_registered:
+                        response["replaced"] = replaced_name
+                        response["installed"] = {
+                            "filename": fname,
+                            "version_number": version_number,
+                            "version_id": main_vid,
+                            "disabled": installed_disabled,
+                        }
                     if deps_result is not None:
                         response.update(deps_result)
                     self.send_json(response)

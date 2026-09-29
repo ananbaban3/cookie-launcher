@@ -3238,6 +3238,16 @@ button.installed-cat-tab {
     animation: none !important;
     transition: none !important;
   }
+  /* Sürüm değiştir butonu ve seçici overlay */
+  .btn-mod-ver,
+  .pds-btn-ver,
+  .vsw-row,
+  .vsw-btn,
+  .vsw-type,
+  .version-switch-window {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* ==============================================================================
@@ -5095,4 +5105,857 @@ body {
 @media (max-width: 860px) {
   .pds-store-bar { grid-template-columns: 1fr; }
   .pds-store-grid { grid-template-columns: 1fr; }
+}
+
+
+/* ==============================================================================
+   COOKIELAUNCHER v3.0 — ULTRA-GLASSMORPHISM & ANIMASYONMAXX REDESIGN
+   Felsefe: 0 Reflow • 100% GPU Destekli Geçişler • Catppuccin Mocha • ~30MB RAM
+   ============================================================================== */
+
+/* ------------------------------------------------------------------------------
+   1. CATPPUCCIN MOCHA DEĞİŞKENLERİ & AKILLI CAM TOKENLARI
+   ------------------------------------------------------------------------------ */
+:root {
+  /* Catppuccin Mocha Orijinal Renkleri */
+  --ctp-base: #1e1e2e;
+  --ctp-mantle: #181825;
+  --ctp-crust: #11111b;
+  --ctp-text: #cdd6f4;
+  --ctp-subtext0: #a6adc8;
+  --ctp-subtext1: #bac2de;
+  --ctp-blue: #89b4fa;
+  --ctp-lavender: #b4befe;
+  --ctp-mauve: #cba6f7;
+  --ctp-green: #a6e3a1;
+  --ctp-red: #f38ba8;
+  --ctp-peach: #fab387;
+  --ctp-yellow: #f9e2af;
+
+  /* RAM Dostu Saydam Cam Katmanları */
+  --glass-bg-base: rgba(30, 30, 46, 0.72);
+  --glass-bg-surface: rgba(24, 24, 37, 0.65);
+  --glass-bg-surface-hover: rgba(30, 30, 46, 0.85);
+  --glass-bg-deep: rgba(17, 17, 27, 0.82);
+
+  /* Asil Kenarlıklar (Floating Glass Effect) */
+  --glass-border: 1px solid rgba(255, 255, 255, 0.06);
+  --glass-border-hover: 1px solid rgba(137, 180, 250, 0.4);
+  --glass-border-active: 1px solid rgba(137, 180, 250, 0.65);
+
+  /* Tek Katmanlı Performans Cam Efekti */
+  --glass-blur: blur(25px);
+
+  /* Akıcı Bezier Eğrileri (GPU Dostu) */
+  --ease-elastic: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ------------------------------------------------------------------------------
+   2. ANA EKRAN & PROFİLLER: YAN YANA PROFİL KARTLARI
+   ------------------------------------------------------------------------------ */
+.instance-card,
+.premium-card {
+  position: relative;
+  background: var(--glass-bg-surface) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border: var(--glass-border) !important;
+  border-radius: 16px !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+
+  /* GPU kompozitörü için: boyama yapmadan akıcı dönüşümler */
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 0.28s var(--ease-elastic),
+    border-color 0.28s ease,
+    box-shadow 0.28s ease,
+    background-color 0.28s ease !important;
+  will-change: transform;
+}
+
+/* Hover: %100 GPU Destekli Mikro Kayma + Yumuşak Neon Işıma */
+.instance-card:hover,
+.premium-card:hover {
+  transform: translate3d(0, -4px, 0) scale(1.015) !important;
+  border-color: rgba(137, 180, 250, 0.45) !important;
+  /* Tek katmanlı, CPU yormayan Catppuccin Blue neon ışığı */
+  box-shadow:
+    0 12px 28px -4px rgba(0, 0, 0, 0.55),
+    0 0 20px -2px rgba(137, 180, 250, 0.22) !important;
+}
+
+/* Aktif Kart Durumu: Neon Vurgu + İpeksi Glow */
+.instance-card.active,
+.premium-card.active {
+  border-color: var(--ctp-blue) !important;
+  background: linear-gradient(
+    145deg,
+    rgba(137, 180, 250, 0.12) 0%,
+    rgba(24, 24, 37, 0.8) 100%
+  ) !important;
+  box-shadow:
+    0 12px 30px -4px rgba(0, 0, 0, 0.6),
+    0 0 24px rgba(137, 180, 250, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+.instance-card .inst-card-top,
+.premium-card .card-top {
+  position: relative;
+  padding: 18px 18px 14px;
+  background: radial-gradient(
+    130% 120% at 10% 0%,
+    rgba(137, 180, 250, 0.12),
+    transparent 65%
+  );
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.inst-icon-box {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(17, 17, 27, 0.6) !important;
+  border-radius: 14px !important;
+  transition: transform 0.25s var(--ease-elastic) !important;
+}
+
+.instance-card:hover .inst-icon-box,
+.premium-card:hover .inst-icon-box {
+  transform: scale(1.08) rotate(-1.5deg) !important;
+}
+
+.inst-chip {
+  background: rgba(17, 17, 27, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: var(--ctp-subtext0) !important;
+  border-radius: 999px !important;
+  padding: 3px 9px !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.2px;
+  transition: color 0.2s ease, border-color 0.2s ease !important;
+}
+
+.instance-card.active .inst-chip {
+  border-color: rgba(137, 180, 250, 0.35) !important;
+  color: var(--ctp-text) !important;
+}
+
+/* ------------------------------------------------------------------------------
+   3. ÜST GEZİNME (NAVBAR) ETKİLEŞİMLERİ (.nav-tab)
+   ------------------------------------------------------------------------------ */
+.nav-tab {
+  transition:
+    transform 0.22s var(--ease-elastic),
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.25s ease !important;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+}
+
+.nav-tab:hover {
+  transform: translate3d(0, -2px, 0) !important;
+  color: #fff !important;
+  background: rgba(137, 180, 250, 0.08) !important;
+  border-color: rgba(137, 180, 250, 0.22) !important;
+}
+
+.nav-tab.active {
+  color: #fff !important;
+  background: rgba(137, 180, 250, 0.14) !important;
+  border-color: rgba(137, 180, 250, 0.4) !important;
+  box-shadow:
+    inset 0 -2px 0 var(--ctp-blue),
+    0 4px 16px rgba(137, 180, 250, 0.18) !important;
+}
+
+/* ------------------------------------------------------------------------------
+   4. PROFİL DETAY EKRANI: TAM EKRAN CAM VE BAŞLIK (.pds-screen, .pds-header)
+   ------------------------------------------------------------------------------ */
+.pds-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: var(--glass-bg-deep) !important;
+  backdrop-filter: blur(30px) !important;
+  -webkit-backdrop-filter: blur(30px) !important;
+  animation: pdsFadeIn 0.22s var(--ease-smooth) both;
+}
+
+@keyframes pdsFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pds-header {
+  height: 64px;
+  background: var(--glass-bg-surface) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border-bottom: var(--glass-border) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35) !important;
+  padding: 0 20px;
+}
+
+.pds-back {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: var(--glass-border) !important;
+  border-radius: 10px !important;
+  color: var(--ctp-text) !important;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.2s var(--ease-elastic), background 0.2s ease, border-color 0.2s ease !important;
+}
+
+.pds-back:hover {
+  transform: translate3d(-3px, 0, 0) !important;
+  background: rgba(137, 180, 250, 0.15) !important;
+  border-color: var(--ctp-blue) !important;
+  color: #fff !important;
+}
+
+/* ------------------------------------------------------------------------------
+   5. SOL DİKEY MENÜ: 12 SEKME BUTONU (.pds-sidebar & .pds-side-tab)
+   ------------------------------------------------------------------------------ */
+.pds-sidebar {
+  width: 245px !important;
+  background: rgba(17, 17, 27, 0.65) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border-right: var(--glass-border) !important;
+  padding: 12px 10px !important;
+  gap: 4px !important;
+}
+
+/* 12 Sekme Butonunun Temel Mimarisi */
+.pds-side-tab,
+.nav-tab-vertical {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--ctp-subtext0);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+
+  /* GPU üzerinde akıcı mikro-kayma */
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 0.22s var(--ease-elastic),
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.25s ease !important;
+  will-change: transform;
+}
+
+/* Hover: Metin ve İkon Sağa Kayar, Catppuccin Blue ile Parlar */
+.pds-side-tab:hover,
+.nav-tab-vertical:hover {
+  transform: translate3d(5px, 0, 0) !important;
+  background: rgba(137, 180, 250, 0.08) !important;
+  border-color: rgba(137, 180, 250, 0.18) !important;
+  color: #ffffff !important;
+}
+
+.pds-side-tab:hover .pds-side-icon {
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 6px rgba(137, 180, 250, 0.5));
+}
+
+.pds-side-icon {
+  font-size: 16px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+  transition: transform 0.2s var(--ease-elastic), filter 0.2s ease;
+}
+
+/* AKTİF SEKME: Arkasında İçe Doğru Neon Işık Havuzu + Kenar Vurgusu */
+.pds-side-tab.active,
+.nav-tab-vertical.active {
+  background: linear-gradient(
+    90deg,
+    rgba(137, 180, 250, 0.18) 0%,
+    rgba(180, 190, 254, 0.06) 100%
+  ) !important;
+  color: #ffffff !important;
+  border-color: rgba(137, 180, 250, 0.35) !important;
+  transform: translate3d(3px, 0, 0) !important;
+
+  /* İstenen o asil iç neon havuzu (inset glow) */
+  box-shadow:
+    inset 0 0 16px rgba(137, 180, 250, 0.18),
+    inset 3px 0 0 0 var(--ctp-blue),
+    0 4px 12px rgba(0, 0, 0, 0.25) !important;
+}
+
+.pds-side-tab.active .pds-side-icon {
+  transform: scale(1.15);
+  filter: drop-shadow(0 0 8px rgba(137, 180, 250, 0.7));
+}
+
+/* ------------------------------------------------------------------------------
+   6. SAĞ İÇERİK ALANI: SIFIR REFLOW FADE-IN GEÇİŞİ (.pds-content, .pds-pane)
+   ------------------------------------------------------------------------------ */
+.pds-content {
+  background: transparent !important;
+  padding: 22px 28px 36px !important;
+}
+
+/* Sekmeler arası geçişlerde donma yapmayan %100 GPU Fade-In */
+.pds-pane {
+  animation: pdsPaneFadeIn 0.24s var(--ease-smooth) both !important;
+}
+
+@keyframes pdsPaneFadeIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* İçerik Kartları & Satırları (Modlar, Shaderlar, Sürümler) */
+.pds-item,
+.pds-info-card,
+.pds-mr-card {
+  background: var(--glass-bg-surface) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border: var(--glass-border) !important;
+  border-radius: 13px !important;
+  padding: 12px 16px !important;
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 0.2s var(--ease-elastic),
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease !important;
+}
+
+.pds-item:hover,
+.pds-mr-card:hover {
+  transform: translate3d(3px, 0, 0) !important;
+  border-color: rgba(137, 180, 250, 0.35) !important;
+  background: var(--glass-bg-surface-hover) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ------------------------------------------------------------------------------
+   7. SAĞDAN KAYAN MOD / SHADER DETAY ÇEKMECESİ (#pdsDrawer / #mod-detail-drawer)
+   ------------------------------------------------------------------------------ */
+/* Karartma Katmanı (Backdrop) */
+.pds-drawer-backdrop,
+#pdsDrawerBackdrop,
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 915;
+  background: rgba(17, 17, 27, 0.6) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.32s ease !important;
+}
+
+.pds-drawer-backdrop.show,
+#pdsDrawerBackdrop.show,
+.drawer-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Çekmece Gövdesi (Sıfır DOM Silme, %100 Donanım İvmelendirmesi) */
+#pdsDrawer,
+#mod-detail-drawer,
+.pds-drawer,
+.glass-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 480px;
+  max-width: 92vw;
+  z-index: 920;
+  background: rgba(24, 24, 37, 0.88) !important;
+  backdrop-filter: blur(28px) !important;
+  -webkit-backdrop-filter: blur(28px) !important;
+  border-left: var(--glass-border) !important;
+  box-shadow:
+    -16px 0 45px rgba(0, 0, 0, 0.6),
+    0 0 35px rgba(137, 180, 250, 0.08) !important;
+  display: flex;
+  flex-direction: column;
+
+  /* Çekmece kapalıyken display:none yerine 3D ekran dışına itilir (Zero Reflow) */
+  transform: translate3d(100%, 0, 0) !important;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Çekmece Açık Durumu */
+#pdsDrawer.open,
+#mod-detail-drawer.open,
+.pds-drawer.open,
+.glass-drawer.open,
+.glass-drawer.active {
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto;
+}
+
+/* Çekmece Başlığı ve Gövdesi */
+.pds-drawer-head {
+  height: 58px;
+  padding: 0 20px;
+  background: rgba(30, 30, 46, 0.6) !important;
+  border-bottom: var(--glass-border) !important;
+}
+
+.pds-drawer-title {
+  color: var(--ctp-text) !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.3px;
+}
+
+.pds-drawer-body {
+  padding: 20px !important;
+}
+
+/* ------------------------------------------------------------------------------
+   8. BUTONLAR, ROZETLER VE MİKRO-AKSANLAR
+   ------------------------------------------------------------------------------ */
+/* Birincil Butonlar */
+.pds-btn-primary,
+.btn-primary-action {
+  background: linear-gradient(
+    135deg,
+    var(--ctp-blue) 0%,
+    var(--ctp-lavender) 100%
+  ) !important;
+  color: #11111b !important;
+  font-weight: 800 !important;
+  border: none !important;
+  border-radius: 9px !important;
+  box-shadow: 0 4px 14px rgba(137, 180, 250, 0.3) !important;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.2s var(--ease-elastic), box-shadow 0.2s ease, filter 0.2s ease !important;
+}
+
+.pds-btn-primary:hover,
+.btn-primary-action:hover {
+  transform: translate3d(0, -2px, 0) scale(1.02) !important;
+  box-shadow: 0 6px 20px rgba(137, 180, 250, 0.45) !important;
+  filter: brightness(1.06);
+}
+
+.pds-btn-primary:active,
+.btn-primary-action:active {
+  transform: translate3d(0, 1px, 0) scale(0.98) !important;
+}
+
+/* Tehlike / Silme Butonları */
+.pds-btn-danger {
+  color: var(--ctp-red) !important;
+  border: 1px solid rgba(243, 139, 168, 0.3) !important;
+  background: rgba(243, 139, 168, 0.08) !important;
+  border-radius: 8px !important;
+  transition: transform 0.2s var(--ease-elastic), background 0.2s ease, border-color 0.2s ease !important;
+}
+
+.pds-btn-danger:hover {
+  background: rgba(243, 139, 168, 0.22) !important;
+  border-color: var(--ctp-red) !important;
+  transform: translate3d(0, -1px, 0) !important;
+}
+
+/* Catppuccin Rozetleri (Badges) */
+.pds-ver-badge {
+  color: var(--ctp-mauve) !important;
+  background: rgba(203, 166, 247, 0.12) !important;
+  border: 1px solid rgba(203, 166, 247, 0.3) !important;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.pds-off-badge {
+  color: var(--ctp-red) !important;
+  background: rgba(243, 139, 168, 0.12) !important;
+  border: 1px solid rgba(243, 139, 168, 0.3) !important;
+}
+
+/* ==============================================================================
+   9. SÜRÜM DEĞİŞTİR (VERSION SWITCH) — amber buton + sürüm seçici overlay
+   ============================================================================== */
+
+/* Kurulu kart artık tamamen soluklaşmasın; parlak amber buton öne çıksın.
+   Karartma yalnızca içerik metin/ikon katmanına uygulanır. */
+.mod-card.installed {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.mod-card.installed .mod-icon-box,
+.mod-card.installed .mod-title,
+.mod-card.installed .mod-desc {
+  opacity: 0.55;
+  filter: grayscale(0.8);
+}
+
+.mod-card.installed:hover {
+  border-color: rgba(255, 176, 32, 0.35) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 176, 32, 0.12) !important;
+}
+
+.mod-bottom-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  gap: 6px;
+}
+
+.mod-card-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Parlak amber "⇄ Sürüm Değiştir" butonu (arama kartı) */
+.btn-mod-ver {
+  background: linear-gradient(135deg, #ffd166 0%, #ff9b2b 100%) !important;
+  border: 1px solid rgba(255, 209, 102, 0.85) !important;
+  color: #1b1206 !important;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 0 12px rgba(255, 176, 32, 0.38);
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.btn-mod-ver:hover {
+  filter: brightness(1.08);
+  transform: translate3d(0, -1px, 0);
+  box-shadow: 0 0 18px rgba(255, 176, 32, 0.6);
+}
+
+.btn-mod-ver:active {
+  transform: translate3d(0, 1px, 0);
+}
+
+/* Profil detayı satır aksiyonu "⇄ Sürüm" butonu */
+.pds-btn-ver {
+  color: #ffcf70 !important;
+  border-color: rgba(255, 176, 32, 0.5) !important;
+  background: rgba(255, 176, 32, 0.14) !important;
+}
+
+.pds-btn-ver:hover {
+  background: rgba(255, 176, 32, 0.28) !important;
+  border-color: #ffb020 !important;
+}
+
+/* ---------- Sürüm seçici overlay ---------- */
+.version-switch-window {
+  width: 780px;
+  max-width: 95vw;
+  height: 640px;
+  max-height: 88vh;
+}
+
+.vsw-head {
+  gap: 12px;
+  min-width: 0;
+}
+
+.vsw-head-text {
+  min-width: 0;
+}
+
+.vsw-head-text h3 {
+  max-width: 560px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vsw-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  overflow: hidden;
+}
+
+.vsw-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vsw-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsw-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+}
+
+.vsw-search-row {
+  flex-shrink: 0;
+}
+
+.vsw-search-row .styled-input {
+  width: 100%;
+}
+
+/* İnce amber kaydırma çubuğu */
+.vsw-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 176, 32, 0.5) transparent;
+}
+
+.vsw-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.vsw-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vsw-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 176, 32, 0.42);
+  border-radius: 999px;
+}
+
+.vsw-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 176, 32, 0.7);
+}
+
+.vsw-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vsw-row:hover {
+  border-color: rgba(255, 176, 32, 0.35);
+  background: var(--bg-surface-hover);
+}
+
+.vsw-row.is-installed {
+  border-color: rgba(166, 227, 161, 0.45);
+  background: rgba(166, 227, 161, 0.05);
+}
+
+.vsw-row.is-incompat {
+  opacity: 0.62;
+}
+
+.vsw-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.vsw-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vsw-ver {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.vsw-row-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sürüm türü rozetleri */
+.vsw-type {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.vsw-type-release {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.14);
+  border: 1px solid rgba(166, 227, 161, 0.4);
+}
+
+.vsw-type-beta {
+  color: #f9e2af;
+  background: rgba(249, 226, 175, 0.14);
+  border: 1px solid rgba(249, 226, 175, 0.4);
+}
+
+.vsw-type-alpha {
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.14);
+  border: 1px solid rgba(243, 139, 168, 0.4);
+}
+
+.vsw-installed-tag {
+  font-size: 10px;
+  font-weight: 800;
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.14);
+  border: 1px solid rgba(166, 227, 161, 0.4);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.vsw-incompat-tag {
+  font-size: 10px;
+  font-weight: 800;
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.12);
+  border: 1px solid rgba(243, 139, 168, 0.35);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.vsw-row-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.vsw-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: #fff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vsw-btn:hover {
+  filter: brightness(1.1);
+}
+
+.vsw-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
+.vsw-btn-install {
+  background: linear-gradient(135deg, #ffd166 0%, #ff9b2b 100%) !important;
+  border: 1px solid rgba(255, 209, 102, 0.85) !important;
+  color: #1b1206 !important;
+  font-weight: 800;
+  box-shadow: 0 0 12px rgba(255, 176, 32, 0.35);
+}
+
+.vsw-btn-install:hover {
+  box-shadow: 0 0 18px rgba(255, 176, 32, 0.6);
+  transform: translate3d(0, -1px, 0);
+}
+
+.vsw-btn.is-installed {
+  color: #a6e3a1 !important;
+  background: rgba(166, 227, 161, 0.12) !important;
+  border-color: rgba(166, 227, 161, 0.4) !important;
+}
+
+.vsw-empty {
+  align-items: center;
+  justify-content: center;
+  padding: 30px 16px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.vsw-truncated-note {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #f9e2af;
+  background: rgba(249, 226, 175, 0.08);
+  border: 1px dashed rgba(249, 226, 175, 0.35);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .version-switch-window {
+    height: 86vh;
+  }
+  .vsw-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .vsw-row-action {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
