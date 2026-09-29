@@ -47,6 +47,7 @@ const state = {
   installedModFiles: [],
   installedContent: { mod: [], shader: [], resourcepack: [] },
   installedContentMeta: { mod: {}, shader: {}, resourcepack: {} },
+  installedContentInstanceId: "",
   installedCategory: "mod",
   installedPanelCollapsed: false,
   installedLoading: false,
@@ -2208,6 +2209,7 @@ async function refreshInstalledContent() {
   state.installedContentMeta = { mod: {}, shader: {}, resourcepack: {} };
 
   const target = getModrinthTarget();
+  state.installedContentInstanceId = target ? String(target.id || "") : "";
   state.installedLoading = !!target;
   renderInstalledPanel();
   if (!target) {
@@ -3936,18 +3938,10 @@ function vswIsCompatible(v, cat, inst) {
 }
 
 function vswReason(v, cat, inst) {
-  if (!inst) return "Profil bulunamadı.";
-  const gvs = (v.game_versions || []).map(x => String(x));
-  if (!gvs.includes(String(inst.version || ""))) {
-    return `Profilin Minecraft sürümü (${inst.version || "?"}) bu sürümde yok.`;
-  }
-  if (cat === "mod") {
-    const loaders = (v.loaders || []).map(x => String(x).toLowerCase());
-    if (!loaders.includes(String(inst.loader || "").toLowerCase())) {
-      return `Profil yükleyicisi (${inst.loader || "?"}) bu sürümde yok.`;
-    }
-  }
-  return "";
+  if (!inst) return "Bu sürüm profilinizle uyumlu değil.";
+  const mc = inst.version || "?";
+  const loader = pdsLoaderLabel(inst.loader);
+  return `Bu sürüm profilin ${mc} ${loader} yapılandırmasıyla uyumlu değil.`;
 }
 
 function vswResolveInstalledVersion() {
@@ -3962,6 +3956,67 @@ function vswResolveInstalledVersion() {
     if (row && row.version) return row.version;
   }
   return "";
+}
+
+function vswInstalledItemLoader(item) {
+  const raw = item && item.loader;
+  if (Array.isArray(raw)) {
+    const first = raw.map(x => String(x || "").toLowerCase()).find(Boolean);
+    if (first) return first;
+  } else if (raw) {
+    return String(raw).toLowerCase();
+  }
+  return String((vswState.instance && vswState.instance.loader) || "").toLowerCase();
+}
+
+function vswInstalledContentItems() {
+  const cat = vswState.cat;
+  const slug = String(vswState.slug || "").toLowerCase();
+  const target = vswState.instance;
+  if (!slug || !target || !target.id) return [];
+
+  const items = [];
+  const seen = new Set();
+  const addItem = (f) => {
+    if (!f) return;
+    const filename = String(f.name || f.filename || "").replace(/\.disabled$/i, "").toLowerCase();
+    const key = filename || `v:${vswNormalizeVersion(f.version)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push(f);
+  };
+  const collect = (list) => {
+    (Array.isArray(list) ? list : []).forEach(f => {
+      if (String((f && f.slug) || "").toLowerCase() === slug) addItem(f);
+    });
+  };
+
+  // Yalnızca ekrandaki profille eşleşen kurulu içerik listelerini kullan (uydurma yok).
+  if (pdsState.instanceId === target.id) collect(pdsState.content[cat]);
+  if (state.installedContentInstanceId === target.id) collect(state.installedContent[cat]);
+  return items;
+}
+
+function vswVersionIsInstalled(version, installedItems) {
+  if (!version || !Array.isArray(installedItems) || installedItems.length === 0) return false;
+  const rowFilename = String(version.primary_filename || "").toLowerCase();
+  const rowVersion = vswNormalizeVersion(version.version_number);
+  const rowLoaders = new Set((version.loaders || []).map(l => String(l).toLowerCase()));
+  const loaderRequired = vswState.cat === "mod";
+
+  return installedItems.some(item => {
+    const itemFilename = String(item.name || item.filename || "").replace(/\.disabled$/i, "").toLowerCase();
+    // 1) Dosya adı eşleşmesi kesin kurulu sayılır.
+    if (rowFilename && itemFilename && rowFilename === itemFilename) return true;
+    // 2) Aksi hâlde sürüm numarası eşleşmeli.
+    if (!rowVersion || vswNormalizeVersion(item.version) !== rowVersion) return false;
+    // Shader / doku paketinde yükleyici aranmaz.
+    if (!loaderRequired) return true;
+    // 3) Loader kesişimi şart; kurulu öğenin loader'ı yoksa profilin loader'ı kullanılır.
+    const itemLoader = vswInstalledItemLoader(item);
+    if (!itemLoader) return false;
+    return rowLoaders.has(itemLoader);
+  });
 }
 
 async function openVersionSwitchOverlay(opts = {}, catArg) {
@@ -4089,13 +4144,14 @@ function vswRenderList() {
   }
   if (empty) empty.style.display = "none";
 
-  const installedNorm = vswNormalizeVersion(vswResolveInstalledVersion());
+  const installedItems = vswInstalledContentItems();
 
   versions.forEach(v => {
     const compatible = typeof v.compatible === "boolean"
       ? v.compatible
       : vswIsCompatible(v, vswState.cat, vswState.instance);
-    const isInstalled = installedNorm && vswNormalizeVersion(v.version_number) === installedNorm;
+    // Öncelik: uyumsuz > Kurulu. Uyumsuz satır asla "Kurulu" göstermez.
+    const isInstalled = compatible && vswVersionIsInstalled(v, installedItems);
 
     const row = document.createElement("div");
     row.className = "vsw-row" +
