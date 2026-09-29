@@ -91,3 +91,36 @@ jobs:
             bu proje Mojang/Microsoft ile bağlantılı, sponsorlu veya onaylı değildir.
           releaseDraft: false
           prerelease: false
+
+      - name: Windows portable ZIP (WebView2 kurucusu dahil)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ver = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path portable/CookieLauncher | Out-Null
+          Copy-Item "src-tauri/target/release/cookie-launcher.exe" "portable/CookieLauncher/CookieLauncher.exe"
+          if (Test-Path "src-tauri/target/release/backend") {
+            Copy-Item -Recurse "src-tauri/target/release/backend" "portable/CookieLauncher/backend"
+          }
+          # WebView2 Evergreen Standalone Installer (x64) - cevrimdisi kurulum icin
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2124703" -OutFile "portable/CookieLauncher/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          $readme = @"
+          Cookie Launcher - Tasinabilir (Portable) Surum v$ver
+          =====================================================
+          Kurulum gerektirmez: klasoru istediginiz yere kopyalayip CookieLauncher.exe'yi calistirin.
+          (USB bellekten de calisir.)
+
+          UYGULAMA ACILMIYORSA:
+          1) Bu klasordeki MicrosoftEdgeWebView2RuntimeInstallerX64.exe dosyasini calistirin.
+             (Windows 11 ve guncel Windows 10'da WebView2 genellikle hazir gelir.)
+          2) Windows Defender/SmartScreen uyarisi verirse "Daha fazla bilgi" -> "Yine de calistir".
+
+          Lisans: GPL-3.0 (bkz. depodaki LICENSE). Yazilim "AS IS", garanti yoktur.
+          Minecraft, Mojang Synergies AB'nin ticari markasidir; bu proje Mojang/Microsoft
+          ile baglantili veya onayli degildir.
+          "@
+          Set-Content -Path "portable/CookieLauncher/OKUBENI.txt" -Value $readme -Encoding UTF8
+          Compress-Archive -Path "portable/CookieLauncher" -DestinationPath "CookieLauncher_${ver}_x64_portable.zip" -Force
+          gh release upload "v$ver" "CookieLauncher_${ver}_x64_portable.zip" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
