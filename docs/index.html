@@ -825,5 +825,51 @@
       }
     });
   </script>
+
+  <!-- macOS indirme uyarisi (GitHub'a yonlendirmeden ONCE) -->
+  <div id="macWarnModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px" role="dialog" aria-modal="true" aria-labelledby="macWarnTitle">
+    <div style="width:100%;max-width:580px;background:#10121a;border:1px solid #1e2333;border-radius:18px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.65)">
+      <h3 id="macWarnTitle" class="text-lg font-bold text-white">macOS'ta ilk açılış — önce bunu okuyun</h3>
+      <p class="mt-3 text-sm text-slate-300 leading-relaxed">
+        macOS paketleri <strong class="text-white">imzasız ve notarize edilmemiş</strong>. Sebebi:
+        Apple Developer Program üyeliği <strong class="text-white">99 $/yıl</strong> ve bunu karşılayamıyorum.
+        Uygulama tamamen açık kaynak (GPL-3.0); istemezseniz kaynak koddan kendiniz derleyebilirsiniz.
+        Bu yüzden macOS ilk açılışta <strong class="text-white">"geliştirici doğrulanamıyor"</strong> uyarısını
+        gösterir — bu bir virüs işareti değil, yalnızca imza eksikliğidir.
+      </p>
+      <ol class="mt-3 text-sm text-slate-300 leading-relaxed list-decimal pl-5 space-y-2">
+        <li><strong class="text-amber-300">Sağ tık → "Aç", macOS 15 (Sequoia) ve sonrasında artık çalışmıyor.</strong></li>
+        <li><strong class="text-white">Terminal (önerilen):</strong> uygulamayı <code class="font-mono text-cookie-300">/Applications</code>'a taşıyın, sonra çalıştırın:
+          <div class="mt-1 font-mono text-xs text-cookie-300 bg-surface-base border border-surface-border rounded-lg px-3 py-2 break-all">xattr -dr com.apple.quarantine /Applications/CookieLauncher.app</div>
+        </li>
+        <li><strong class="text-white">Arayüzden:</strong> açmayı deneyin → <em>Sistem Ayarları → Gizlilik ve Güvenlik</em> → <strong>"Yine de Aç"</strong> → <strong>Aç</strong>.</li>
+      </ol>
+      <p class="mt-3 text-xs text-slate-400">Devam ettiğinizde GitHub Releases sayfası yeni sekmede açılır.</p>
+      <div class="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+        <button type="button" onclick="closeMacWarning()" class="px-4 py-2 rounded-xl text-sm font-semibold bg-surface-base border border-surface-border text-slate-300 hover:text-white transition-colors">Vazgeç</button>
+        <a id="macWarnContinue" href="https://github.com/cookie-launcher/cookie-launcher/releases/latest" target="_blank" rel="noopener noreferrer" class="px-5 py-2 rounded-xl text-sm font-bold bg-cookie-500 hover:bg-cookie-400 text-slate-950 text-center transition-colors">Anladım, indir (.dmg)</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function openMacWarning(arch) {
+      var m = document.getElementById('macWarnModal');
+      if (!m) return;
+      var btn = document.getElementById('macWarnContinue');
+      if (btn) {
+        btn.textContent = arch === 'x64' ? 'Anladım, indir (.dmg · x64)' : 'Anladım, indir (.dmg · arm64)';
+        btn.href = 'https://github.com/cookie-launcher/cookie-launcher/releases/latest';
+      }
+      m.style.display = 'flex';
+      var first = m.querySelector('button, a');
+      if (first) first.focus();
+    }
+    function closeMacWarning() {
+      var m = document.getElementById('macWarnModal');
+      if (m) m.style.display = 'none';
+    }
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMacWarning(); });
+  </script>
 </body>
 </html>
