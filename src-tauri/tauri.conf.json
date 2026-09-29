@@ -44,7 +44,8 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser"
-      }
+      },
+      "webview2InstallMode": "offlineInstaller"
     },
     "macOS": {
       "minimumSystemVersion": "10.15",
